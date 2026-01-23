@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>News Bulletin Aggregator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <svg class="logo" xmlns="http://www.w3.org/2000/svg" width="101" height="100" fill="none" viewBox="0 0 101 100">
+                    <path fill="#ffffff" d="M49.88 0C22.32 0 0 22.27 0 49.77c0 27.501 22.319 49.77 49.88 49.77 27.563 0 49.882-22.269 49.882-49.77C99.762 22.27 77.442 0 49.88 0ZM36.632 62.99c-7.298-7.281-7.298-19.123 0-26.405 7.298-7.281 19.166-7.281 26.464 0 7.298 7.282 7.298 19.124 0 26.405-7.298 7.282-19.13 7.282-26.464 0Zm37.482 20.326c-5.173 0-9.353-4.171-9.353-9.332 0-5.161 4.18-9.332 9.353-9.332 5.172 0 9.352 4.17 9.352 9.332 0 5.16-4.18 9.332-9.352 9.332Zm19.839 4.241c-3.437 0-6.235 2.793-6.235 6.222 0 3.428 2.798 6.221 6.235 6.221 3.436 0 6.235-2.793 6.235-6.221a6.215 6.215 0 0 0-6.235-6.222Z"/>
+                </svg>
+                <h1>News Bulletin Aggregator</h1>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main">
+        <div class="container">
+            <!-- Status Message -->
+            <div id="status-message" class="status-message" style="display: none;"></div>
+
+            <!-- Profile Management Section -->
+            <section class="card">
+                <h2 class="card-title">Profile</h2>
+                <p class="card-subtitle">Manage news source preferences for different people</p>
+
+                <div class="profile-controls">
+                    <select id="profile-selector" class="profile-select">
+                        {% for profile_id, profile in profiles.items() %}
+                        <option value="{{ profile_id }}" {% if profile_id == active_profile %}selected{% endif %}>
+                            {{ profile.name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+
+                    <button id="new-profile-btn" class="btn btn-secondary">
+                        + New Profile
+                    </button>
+
+                    <button id="delete-profile-btn" class="btn btn-danger" {% if active_profile == 'default' %}disabled{% endif %}>
+                        Delete Profile
+                    </button>
+                </div>
+            </section>
+
+            <!-- Configuration Section -->
+            <section class="card">
+                <h2 class="card-title">Select News Sources</h2>
+                <p class="card-subtitle">Choose which bulletins to include in <span id="profile-name-display">{{ profile_data.name }}</span></p>
+
+                <div id="sources-list" class="sources-list">
+                    {% for name, data in profile_data.sources.items() %}
+                    <label class="source-item">
+                        <input
+                            type="checkbox"
+                            name="source"
+                            value="{{ name }}"
+                            {% if data.enabled %}checked{% endif %}
+                            data-url="{{ data.url }}"
+                            data-custom="{{ 'true' if data.custom else 'false' }}"
+                        >
+                        <div class="source-info">
+                            <span class="source-name">
+                                {{ name }}
+                                {% if data.custom %}
+                                <span class="custom-badge">Custom</span>
+                                {% endif %}
+                            </span>
+                            <span class="source-description">{{ data.description }}</span>
+                        </div>
+                        {% if data.custom %}
+                        <button class="btn-delete-source" data-source="{{ name }}">×</button>
+                        {% endif %}
+                    </label>
+                    {% endfor %}
+                </div>
+
+                <div class="button-group">
+                    <button id="add-custom-source-btn" class="btn btn-secondary">
+                        + Add Custom Source
+                    </button>
+                    <button id="save-config-btn" class="btn btn-secondary">
+                        Save Configuration
+                    </button>
+                </div>
+            </section>
+
+            <!-- Add Custom Source Modal -->
+            <div id="custom-source-modal" class="modal" style="display: none;">
+                <div class="modal-content">
+                    <h3 class="modal-title">Add Custom News Source</h3>
+                    <p class="modal-subtitle">Enter the podcast RSS feed details</p>
+
+                    <div class="form-group">
+                        <label for="custom-source-name">Source Name</label>
+                        <input type="text" id="custom-source-name" class="form-input" placeholder="e.g., NRL Daily Wrap">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="custom-source-url">RSS Feed URL</label>
+                        <input type="url" id="custom-source-url" class="form-input" placeholder="https://feeds.example.com/podcast.rss">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="custom-source-description">Description (Optional)</label>
+                        <input type="text" id="custom-source-description" class="form-input" placeholder="e.g., Daily rugby league news">
+                    </div>
+
+                    <div class="modal-buttons">
+                        <button id="cancel-custom-source-btn" class="btn btn-secondary">Cancel</button>
+                        <button id="save-custom-source-btn" class="btn btn-primary">Add Source</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- New Profile Modal -->
+            <div id="new-profile-modal" class="modal" style="display: none;">
+                <div class="modal-content">
+                    <h3 class="modal-title">Create New Profile</h3>
+                    <p class="modal-subtitle">Set up a personalised news configuration</p>
+
+                    <div class="form-group">
+                        <label for="new-profile-name">Profile Name</label>
+                        <input type="text" id="new-profile-name" class="form-input" placeholder="e.g., Adam - Rugby League">
+                    </div>
+
+                    <div class="modal-buttons">
+                        <button id="cancel-new-profile-btn" class="btn btn-secondary">Cancel</button>
+                        <button id="save-new-profile-btn" class="btn btn-primary">Create Profile</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Email Bulletin Modal -->
+            <div id="email-modal" class="modal" style="display: none;">
+                <div class="modal-content">
+                    <h3 class="modal-title">Email Bulletin</h3>
+                    <p class="modal-subtitle">Enter your email address to receive the bulletin</p>
+
+                    <div class="form-group">
+                        <label for="recipient-email">Email Address</label>
+                        <input type="email" id="recipient-email" class="form-input" placeholder="your.email@example.com" required>
+                    </div>
+
+                    <div class="modal-buttons">
+                        <button id="cancel-email-btn" class="btn btn-secondary">Cancel</button>
+                        <button id="send-email-btn" class="btn btn-primary">Send Email</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Generate Section -->
+            <section class="card">
+                <h2 class="card-title">Generate Bulletin</h2>
+                <p class="card-subtitle">Create your personalised news digest</p>
+
+                <div class="generate-section">
+                    <button id="generate-btn" class="btn btn-primary">
+                        <span class="btn-text">Generate Bulletin</span>
+                        <span class="btn-spinner" style="display: none;">
+                            <span class="spinner"></span>
+                            Generating...
+                        </span>
+                    </button>
+
+                    <div id="generation-progress" class="progress-info" style="display: none;"></div>
+                </div>
+            </section>
+
+            <!-- Recent Files Section -->
+            <section class="card">
+                <h2 class="card-title">Recent Bulletins</h2>
+                <p class="card-subtitle">Download previously generated bulletins</p>
+
+                <div id="recent-files-list" class="files-list">
+                    <p class="loading-text">Loading...</p>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p class="footer-text">
+                News Bulletin Aggregator &copy; 2026
+            </p>
+        </div>
+    </footer>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

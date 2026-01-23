@@ -1,0 +1,39 @@
+# Environment variables (contains secrets)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Generated audio files
+output/*.mp3
+output/temp/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Authentication tokens
+token.json
+credentials.json
+
+# User-specific config (keep config.json in repo for structure reference)
+# If you want to exclude it: config.json

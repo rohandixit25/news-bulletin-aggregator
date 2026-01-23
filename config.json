@@ -1,0 +1,81 @@
+{
+  "active_profile": "rohan",
+  "profiles": {
+    "default": {
+      "name": "Default",
+      "sources": {
+        "ABC News Top Stories": {
+          "enabled": true,
+          "url": "https://www.abc.net.au/feeds/101858056/podcast.xml",
+          "description": "Australian news headlines (60-90 seconds)"
+        },
+        "BBC News 5min": {
+          "enabled": false,
+          "url": "https://podcast.voice.api.bbci.co.uk/rss/audio/p002vsmz?api_key=Wbek5zSqxz0Hk1blo5IBqbd9SCWIfNbT",
+          "description": "World news bulletin (5 minutes)"
+        },
+        "SBS News Updates": {
+          "enabled": false,
+          "url": "https://feeds.sbs.com.au/sbs-news-update",
+          "description": "Australian/World news (morning/midday/evening)"
+        },
+        "CNBC Business Update": {
+          "enabled": false,
+          "url": "https://feeds.simplecast.com/oloBAvaH",
+          "description": "US market updates (3-5 minutes)"
+        },
+        "CommSec Market Update": {
+          "enabled": false,
+          "url": "https://www.omnycontent.com/d/playlist/820f09cf-2ace-4180-a92d-aa4c0008f5fb/7ce30ada-3515-4538-a131-afef0177d550/1b3da022-8454-4155-8336-afef0177d567/podcast.rss",
+          "description": "Australian market commentary"
+        },
+        "AI News Daily": {
+          "enabled": false,
+          "url": "https://ai-news-daily.podigee.io/feed/mp3",
+          "description": "AI technology news (5 minutes)"
+        }
+      }
+    },
+    "rohan": {
+      "name": "Rohan",
+      "sources": {
+        "ABC News Top Stories": {
+          "enabled": true,
+          "url": "https://www.abc.net.au/feeds/101858056/podcast.xml",
+          "description": "Australian news headlines (60-90 seconds)",
+          "custom": false
+        },
+        "BBC News 5min": {
+          "enabled": false,
+          "url": "https://podcast.voice.api.bbci.co.uk/rss/audio/p002vsmz?api_key=Wbek5zSqxz0Hk1blo5IBqbd9SCWIfNbT",
+          "description": "World news bulletin (5 minutes)",
+          "custom": false
+        },
+        "SBS News Updates": {
+          "enabled": false,
+          "url": "https://feeds.sbs.com.au/sbs-news-update",
+          "description": "Australian/World news (morning/midday/evening)",
+          "custom": false
+        },
+        "CNBC Business Update": {
+          "enabled": false,
+          "url": "https://feeds.simplecast.com/oloBAvaH",
+          "description": "US market updates (3-5 minutes)",
+          "custom": false
+        },
+        "CommSec Market Update": {
+          "enabled": false,
+          "url": "https://www.omnycontent.com/d/playlist/820f09cf-2ace-4180-a92d-aa4c0008f5fb/7ce30ada-3515-4538-a131-afef0177d550/1b3da022-8454-4155-8336-afef0177d567/podcast.rss",
+          "description": "Australian market commentary",
+          "custom": false
+        },
+        "AI News Daily": {
+          "enabled": false,
+          "url": "https://ai-news-daily.podigee.io/feed/mp3",
+          "description": "AI technology news (5 minutes)",
+          "custom": false
+        }
+      }
+    }
+  }
+}
