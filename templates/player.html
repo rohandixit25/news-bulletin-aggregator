@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="News Bulletin">
+    <meta name="theme-color" content="#000000">
+
+    <title>News Bulletin Player</title>
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/static/manifest.json">
+
+    <!-- iOS Icons -->
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <link rel="apple-touch-icon" sizes="512x512" href="/static/icons/icon-512.png">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/player.css">
+</head>
+<body>
+    <div class="player-container">
+        <!-- Header -->
+        <header class="player-header">
+            <svg class="logo-small" xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="none" viewBox="0 0 101 100">
+                <path fill="#ffffff" d="M49.88 0C22.32 0 0 22.27 0 49.77c0 27.501 22.319 49.77 49.88 49.77 27.563 0 49.882-22.269 49.882-49.77C99.762 22.27 77.442 0 49.88 0ZM36.632 62.99c-7.298-7.281-7.298-19.123 0-26.405 7.298-7.281 19.166-7.281 26.464 0 7.298 7.282 7.298 19.124 0 26.405-7.298 7.282-19.13 7.282-26.464 0Zm37.482 20.326c-5.173 0-9.353-4.171-9.353-9.332 0-5.161 4.18-9.332 9.353-9.332 5.172 0 9.352 4.17 9.352 9.332 0 5.16-4.18 9.332-9.352 9.332Zm19.839 4.241c-3.437 0-6.235 2.793-6.235 6.222 0 3.428 2.798 6.221 6.235 6.221 3.436 0 6.235-2.793 6.235-6.221a6.215 6.215 0 0 0-6.235-6.222Z"/>
+            </svg>
+            <h1>News Bulletin</h1>
+        </header>
+
+        <!-- Loading State -->
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>Loading latest bulletin...</p>
+        </div>
+
+        <!-- Error State -->
+        <div id="error" class="error" style="display: none;">
+            <p id="error-message">Unable to load bulletin</p>
+            <button onclick="location.reload()" class="btn-retry">Retry</button>
+        </div>
+
+        <!-- Player -->
+        <div id="player" class="player" style="display: none;">
+            <!-- Bulletin Info -->
+            <div class="bulletin-info">
+                <div class="bulletin-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
+                    </svg>
+                </div>
+                <h2 id="bulletin-title">Today's News</h2>
+                <p id="bulletin-profile">Loading...</p>
+                <p id="bulletin-date">--</p>
+            </div>
+
+            <!-- Audio Element -->
+            <audio id="audio" preload="metadata"></audio>
+
+            <!-- Progress Bar -->
+            <div class="progress-container">
+                <div class="progress-bar">
+                    <div id="progress-fill" class="progress-fill"></div>
+                    <input type="range" id="progress-slider" class="progress-slider" min="0" max="100" value="0">
+                </div>
+                <div class="time-info">
+                    <span id="current-time">0:00</span>
+                    <span id="duration">0:00</span>
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div class="controls">
+                <button id="skip-back" class="btn-control" title="Skip back 15 seconds">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.333 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z"/>
+                    </svg>
+                    <span class="skip-label">15s</span>
+                </button>
+
+                <button id="play-pause" class="btn-play" title="Play">
+                    <svg id="play-icon" xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M8 5v14l11-7z"/>
+                    </svg>
+                    <svg id="pause-icon" xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" viewBox="0 0 24 24" style="display: none;">
+                        <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+                    </svg>
+                </button>
+
+                <button id="skip-forward" class="btn-control" title="Skip forward 15 seconds">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z"/>
+                    </svg>
+                    <span class="skip-label">15s</span>
+                </button>
+            </div>
+
+            <!-- Additional Controls -->
+            <div class="secondary-controls">
+                <button id="speed-control" class="btn-secondary" title="Playback speed">
+                    <span id="speed-label">1.0x</span>
+                </button>
+                <a href="/" class="btn-secondary" title="Settings">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/player.js"></script>
+</body>
+</html>

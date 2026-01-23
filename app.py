@@ -413,6 +413,65 @@ def api_email_bulletin(filename):
         }), 500
 
 
+@app.route('/player')
+def player():
+    """Mobile audio player page"""
+    return render_template('player.html')
+
+
+@app.route('/api/latest-bulletin')
+def api_latest_bulletin():
+    """Get the most recent bulletin for the active profile"""
+    try:
+        config = load_config()
+        active_profile = config['active_profile']
+
+        # Get all MP3 files in output directory
+        if not OUTPUT_DIR.exists():
+            return jsonify({'error': 'No bulletins available'}), 404
+
+        # Find most recent bulletin file
+        mp3_files = sorted(OUTPUT_DIR.glob('*.mp3'), key=lambda f: f.stat().st_mtime, reverse=True)
+
+        if not mp3_files:
+            return jsonify({'error': 'No bulletins found'}), 404
+
+        # Get the most recent file
+        latest_file = mp3_files[0]
+        stat = latest_file.stat()
+
+        # Extract profile name from filename (format: profile_timestamp.mp3 or news_bulletin_date.mp3)
+        filename = latest_file.name
+        profile_name = active_profile.replace('_', ' ').title()
+
+        # Try to parse date from filename
+        try:
+            # Format: profile_2026-01-23_12-34-56.mp3
+            if '_' in filename:
+                parts = filename.replace('.mp3', '').split('_')
+                if len(parts) >= 2:
+                    # Try to extract date from timestamp
+                    date_str = parts[1] if '-' in parts[1] else datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d')
+                else:
+                    date_str = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d')
+            else:
+                date_str = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d')
+        except Exception:
+            date_str = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d')
+
+        return jsonify({
+            'filename': filename,
+            'profile_name': profile_name,
+            'date': date_str,
+            'size': stat.st_size,
+            'modified': datetime.fromtimestamp(stat.st_mtime).isoformat()
+        })
+
+    except Exception as e:
+        logger.error(f"Latest bulletin API error: {str(e)}")
+        return jsonify({'error': 'Unable to retrieve bulletin'}), 500
+
+
 if __name__ == '__main__':
     # Ensure output directory exists
     OUTPUT_DIR.mkdir(exist_ok=True)

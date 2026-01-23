@@ -32,6 +32,24 @@ Then open browser to `http://localhost:5000`
 - Recent files browser with download
 - Email delivery to any address
 
+### Mobile Player (iPhone/Android)
+```bash
+cd /workspace/news_bulletin_aggregator
+python3 app.py
+```
+Then on your iPhone, open Safari and navigate to `http://YOUR_IP:5000/player`
+
+**Mobile features:**
+- Progressive Web App (PWA) - install as app icon on home screen
+- One-tap playback of latest bulletin
+- Lock screen controls (play/pause/skip from locked screen)
+- Background playback (continues when switching apps)
+- Playback speed control (0.75x to 2.0x)
+- Skip forward/back 15 seconds
+- No App Store required
+
+**See `IPHONE_SETUP.md` for detailed installation instructions.**
+
 ### First-Time Setup
 
 1. **Install dependencies:**

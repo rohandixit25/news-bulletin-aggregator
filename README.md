@@ -1,13 +1,30 @@
 # News Bulletin Aggregator
 
-Automatically downloads and combines daily news bulletins from ABC News Australia, SBS, BBC, and CNBC into a single audio file.
+Automatically downloads and combines daily news bulletins from multiple sources (ABC, BBC, SBS, CNBC, CommSec, AI News) into a single audio file. Features web interface with profile management and mobile Progressive Web App for iPhone.
 
 ## Features
 
-- ✅ Fetches latest bulletins from 4 major news sources
+### Audio Aggregation
+- ✅ Fetches latest bulletins from 6 configurable news sources
 - ✅ Combines them into one continuous audio file
-- ✅ Simple, no API keys required
+- ✅ Simple, no API keys required for news sources
 - ✅ Saves as MP3 for easy playback on any device
+
+### Web Interface
+- ✅ Profile management - customise sources for different users
+- ✅ Enable/disable sources per profile
+- ✅ Add custom RSS podcast feeds
+- ✅ One-click bulletin generation
+- ✅ Email delivery with attachments
+- ✅ Recent files browser
+
+### Mobile App (PWA)
+- ✅ Install as app icon on iPhone home screen
+- ✅ One-tap playback of latest bulletin
+- ✅ Lock screen controls (play/pause/skip)
+- ✅ Background playback
+- ✅ Playback speed control (0.75x - 2.0x)
+- ✅ Works offline once loaded
 
 ## Requirements
 
@@ -40,7 +57,24 @@ pip install -r requirements.txt
 
 ## Usage
 
-Run the aggregator:
+### Option 1: Web Interface (Recommended)
+
+Start the web server:
+
+```bash
+python3 app.py
+```
+
+Then open your browser to `http://localhost:5000` to:
+- Configure your news source preferences
+- Create profiles for different users
+- Generate bulletins with one click
+- Email bulletins to yourself
+- Download recent files
+
+### Option 2: Command Line (Quick Test)
+
+Run the aggregator directly:
 
 ```bash
 python3 main.py
@@ -52,15 +86,28 @@ This will:
 3. Combine them into one MP3 file
 4. Save to `output/news_bulletin_YYYY-MM-DD.mp3`
 
+### Option 3: Mobile Player (iPhone)
+
+1. Start the web server: `python3 app.py`
+2. On your iPhone, open Safari and go to `http://YOUR_IP:5000/player`
+3. Tap "Share" → "Add to Home Screen"
+4. Tap the new app icon to instantly play your latest bulletin
+
+**See `IPHONE_SETUP.md` for complete mobile setup instructions.**
+
 ## Output
 
-The combined audio file will be saved in the `output/` directory with the current date:
+Generated bulletins are saved in the `output/` directory:
 
 ```
-output/news_bulletin_2026-01-15.mp3
+output/rohan_2026-01-23_08-30-00.mp3
+output/news_bulletin_2026-01-23.mp3
 ```
 
-Transfer this file to your iPhone and play it in any audio app, or use AirDrop for quick transfer.
+Access via:
+- **Web interface**: Recent files section with download button
+- **Mobile player**: Automatically loads latest bulletin
+- **Direct file**: Transfer via AirDrop or file sharing
 
 ## Customisation
 
