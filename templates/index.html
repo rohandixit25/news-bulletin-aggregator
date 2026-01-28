@@ -33,6 +33,55 @@
             <!-- Status Message -->
             <div id="status-message" class="status-message" style="display: none;"></div>
 
+            <!-- Player Section -->
+            <section class="card player-card">
+                <h2 class="card-title">Player</h2>
+
+                <!-- Bulletin Selector -->
+                <div class="form-group">
+                    <label for="bulletin-selector">Select Bulletin</label>
+                    <select id="bulletin-selector" class="profile-select">
+                        <option value="">Loading bulletins...</option>
+                    </select>
+                </div>
+
+                <!-- Audio Player -->
+                <div id="audio-player" class="audio-player" style="display: none;">
+                    <audio id="audio" preload="metadata" controls></audio>
+
+                    <div class="player-controls">
+                        <button id="play-btn" class="btn-icon" title="Play/Pause">
+                            <svg id="play-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M8 5v14l11-7z"/>
+                            </svg>
+                            <svg id="pause-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 24 24" style="display: none;">
+                                <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+                            </svg>
+                        </button>
+
+                        <div class="time-display">
+                            <span id="current-time">0:00</span>
+                            <span> / </span>
+                            <span id="duration">0:00</span>
+                        </div>
+
+                        <button id="speed-btn" class="btn-secondary btn-small" title="Playback speed">
+                            <span id="speed-text">1.0x</span>
+                        </button>
+                    </div>
+
+                    <div class="player-info" id="player-info">
+                        <span id="bulletin-filename">--</span>
+                    </div>
+                </div>
+
+                <div id="no-bulletin-message" class="empty-state" style="display: none;">
+                    <div class="empty-state-icon">🎧</div>
+                    <div class="empty-state-title">No bulletins available</div>
+                    <div class="empty-state-text">Generate your first bulletin below</div>
+                </div>
+            </section>
+
             <!-- Profile Management Section -->
             <section class="card">
                 <h2 class="card-title">Profile</h2>
@@ -190,8 +239,81 @@
                     <p class="loading-text">Loading...</p>
                 </div>
             </section>
+
+            <!-- Storage Management Section -->
+            <section class="card">
+                <h2 class="card-title">Storage Management</h2>
+                <p class="card-subtitle">Manage disk space and cleanup old bulletins</p>
+
+                <div id="storage-info" class="storage-info">
+                    <div class="storage-stat">
+                        <div class="stat-label">Total Files</div>
+                        <div class="stat-value" id="stat-file-count">-</div>
+                    </div>
+                    <div class="storage-stat">
+                        <div class="stat-label">Total Size</div>
+                        <div class="stat-value" id="stat-total-size">-</div>
+                    </div>
+                    <div class="storage-stat">
+                        <div class="stat-label">Oldest File</div>
+                        <div class="stat-value" id="stat-oldest-file">-</div>
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button id="refresh-storage-btn" class="btn btn-secondary">
+                        Refresh Storage Info
+                    </button>
+                    <button id="cleanup-old-files-btn" class="btn btn-danger">
+                        Cleanup Old Files (Keep Last 10)
+                    </button>
+                </div>
+            </section>
         </div>
     </main>
+
+    <!-- Onboarding Modal -->
+    <div id="onboarding-modal" class="modal" style="display: none;">
+        <div class="modal-content onboarding-content">
+            <!-- Step 1: Welcome -->
+            <div id="onboarding-step-1" class="onboarding-step">
+                <h2>Welcome to News Bulletin Aggregator</h2>
+                <p>Get your daily news from multiple sources combined into one convenient audio file.</p>
+                <p>Let's set up your personalized news profile.</p>
+                <div class="modal-buttons">
+                    <button id="onboarding-next-1" class="btn btn-primary">Continue</button>
+                </div>
+            </div>
+
+            <!-- Step 2: Create Profile -->
+            <div id="onboarding-step-2" class="onboarding-step" style="display: none;">
+                <h2>Create Your Profile</h2>
+                <p>Choose a name for your news preferences</p>
+                <div class="form-group">
+                    <label for="onboarding-profile-name">Profile Name</label>
+                    <input type="text" id="onboarding-profile-name" class="form-input" placeholder="e.g., My News">
+                </div>
+                <div class="modal-buttons">
+                    <button id="onboarding-back-2" class="btn btn-secondary">Back</button>
+                    <button id="onboarding-next-2" class="btn btn-primary">Continue</button>
+                </div>
+            </div>
+
+            <!-- Step 3: Select Sources -->
+            <div id="onboarding-step-3" class="onboarding-step" style="display: none;">
+                <h2>Select Your News Sources</h2>
+                <p>Choose which bulletins you'd like to include</p>
+                <div id="onboarding-sources-list" class="sources-list">
+                    <!-- Will be populated dynamically -->
+                </div>
+                <div class="modal-buttons">
+                    <button id="onboarding-back-3" class="btn btn-secondary">Back</button>
+                    <button id="onboarding-finish" class="btn btn-primary">Finish Setup</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 
     <!-- Footer -->
     <footer class="footer">

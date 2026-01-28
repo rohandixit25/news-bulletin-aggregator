@@ -7,10 +7,11 @@ Flask application with Quantium branding
 import os
 import json
 import logging
-from datetime import datetime
-from flask import Flask, render_template, request, jsonify, send_file
+from datetime import datetime, timedelta
+from flask import Flask, render_template, request, jsonify, send_file, Response, stream_with_context
 from pathlib import Path
 from main import NewsBulletinAggregator
+from enhanced_generator import EnhancedBulletinGenerator
 from email_sender import EmailSender
 from dotenv import load_dotenv
 
@@ -75,7 +76,8 @@ DEFAULT_CONFIG = {
             'name': 'Default',
             'sources': DEFAULT_SOURCES.copy()
         }
-    }
+    },
+    'device_profiles': {}  # Maps device_id -> profile_id
 }
 
 
@@ -93,8 +95,13 @@ def load_config():
                             'name': 'Default',
                             'sources': config.get('sources', DEFAULT_SOURCES.copy())
                         }
-                    }
+                    },
+                    'device_profiles': {}
                 }
+                save_config(config)
+            # Add device_profiles if missing
+            if 'device_profiles' not in config:
+                config['device_profiles'] = {}
                 save_config(config)
             return config
     return DEFAULT_CONFIG
@@ -254,6 +261,39 @@ def api_custom_source(profile_id):
             return jsonify({'status': 'success'})
 
         return jsonify({'status': 'error', 'message': 'Source not found'}), 404
+
+
+@app.route('/api/device/<device_id>/profile', methods=['GET', 'POST'])
+def api_device_profile(device_id):
+    """Get or set profile for a device"""
+    config = load_config()
+
+    if request.method == 'GET':
+        # Get profile linked to this device
+        profile_id = config.get('device_profiles', {}).get(device_id)
+        if profile_id:
+            return jsonify({'profile_id': profile_id})
+        return jsonify({'profile_id': None})
+
+    elif request.method == 'POST':
+        # Link device to profile
+        data = request.json
+        profile_id = data.get('profile_id')
+
+        if not profile_id:
+            return jsonify({'status': 'error', 'message': 'Profile ID required'}), 400
+
+        if profile_id not in config['profiles']:
+            return jsonify({'status': 'error', 'message': 'Profile does not exist'}), 404
+
+        # Save device-profile mapping
+        if 'device_profiles' not in config:
+            config['device_profiles'] = {}
+
+        config['device_profiles'][device_id] = profile_id
+        save_config(config)
+
+        return jsonify({'status': 'success', 'device_id': device_id, 'profile_id': profile_id})
 
 
 @app.route('/api/generate', methods=['POST'])
@@ -470,6 +510,205 @@ def api_latest_bulletin():
     except Exception as e:
         logger.error(f"Latest bulletin API error: {str(e)}")
         return jsonify({'error': 'Unable to retrieve bulletin'}), 500
+
+
+@app.route('/api/generate/stream')
+def api_generate_stream():
+    """Generate bulletin with Server-Sent Events progress updates"""
+    def generate():
+        try:
+            config = load_config()
+            active_profile = config['active_profile']
+            profile_data = config['profiles'][active_profile]
+
+            # Get enabled sources
+            enabled_sources = {
+                name: data['url']
+                for name, data in profile_data['sources'].items()
+                if data['enabled']
+            }
+
+            if not enabled_sources:
+                yield f"data: {json.dumps({'stage': 'error', 'message': 'No sources enabled'})}\n\n"
+                return
+
+            # Create enhanced generator
+            generator = EnhancedBulletinGenerator(output_dir='output')
+
+            # Stream progress updates
+            for progress in generator.generate_with_progress(enabled_sources, profile_data['name']):
+                yield f"data: {json.dumps(progress)}\n\n"
+
+        except Exception as e:
+            logger.error(f"Stream generation error: {str(e)}")
+            yield f"data: {json.dumps({'stage': 'error', 'message': str(e)})}\n\n"
+
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
+
+@app.route('/api/bulletin/<filename>/metadata')
+def api_bulletin_metadata(filename):
+    """Get metadata for a specific bulletin"""
+    try:
+        # Security: Prevent path traversal
+        file_path = OUTPUT_DIR / filename
+        if not file_path.is_relative_to(OUTPUT_DIR):
+            return jsonify({'error': 'Invalid filename'}), 400
+
+        metadata_file = OUTPUT_DIR / f"{Path(filename).stem}.json"
+
+        if metadata_file.exists():
+            with open(metadata_file, 'r') as f:
+                metadata = json.load(f)
+            return jsonify(metadata)
+        else:
+            # Return basic info if no metadata file
+            if file_path.exists():
+                stat = file_path.stat()
+                return jsonify({
+                    'generated_at': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    'sources_attempted': [],
+                    'sources_succeeded': [],
+                    'sources_failed': []
+                })
+            else:
+                return jsonify({'error': 'Bulletin not found'}), 404
+
+    except Exception as e:
+        logger.error(f"Metadata API error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/test-source', methods=['POST'])
+def api_test_source():
+    """Test a single RSS source"""
+    try:
+        data = request.json
+        source_name = data.get('name')
+        source_url = data.get('url')
+
+        if not source_name or not source_url:
+            return jsonify({'status': 'error', 'message': 'Name and URL required'}), 400
+
+        # Create temporary aggregator
+        aggregator = NewsBulletinAggregator(output_dir='output')
+
+        # Try to fetch the source
+        audio_file = aggregator.fetch_latest_bulletin(source_name, source_url)
+
+        if audio_file and audio_file.exists():
+            # Get duration
+            try:
+                from pydub import AudioSegment
+                audio = AudioSegment.from_file(str(audio_file))
+                duration = len(audio) / 1000  # seconds
+
+                # Cleanup test file
+                audio_file.unlink()
+
+                return jsonify({
+                    'status': 'success',
+                    'message': f'Source is working ({duration:.0f} seconds)',
+                    'duration': duration
+                })
+            except Exception as e:
+                # Cleanup test file
+                if audio_file.exists():
+                    audio_file.unlink()
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Downloaded but cannot process audio: {str(e)}'
+                }), 500
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'No audio file available from this source'
+            }), 404
+
+    except Exception as e:
+        logger.error(f"Test source error: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to test source: {str(e)}'
+        }), 500
+
+
+@app.route('/api/cleanup', methods=['POST'])
+def api_cleanup():
+    """Clean up old bulletin files"""
+    try:
+        data = request.json or {}
+        keep_count = data.get('keep_count', 5)  # Keep last N files
+        max_age_days = data.get('max_age_days', 7)  # Delete files older than N days
+
+        if not OUTPUT_DIR.exists():
+            return jsonify({'status': 'success', 'deleted': 0, 'kept': 0})
+
+        # Get all MP3 files sorted by modification time (newest first)
+        mp3_files = sorted(OUTPUT_DIR.glob('*.mp3'), key=lambda f: f.stat().st_mtime, reverse=True)
+
+        deleted_count = 0
+        kept_count = 0
+        cutoff_date = datetime.now() - timedelta(days=max_age_days)
+
+        for idx, file in enumerate(mp3_files):
+            stat = file.stat()
+            file_age = datetime.fromtimestamp(stat.st_mtime)
+
+            # Keep if within keep_count OR newer than max_age_days
+            if idx < keep_count or file_age > cutoff_date:
+                kept_count += 1
+            else:
+                # Delete file and its metadata
+                file.unlink()
+                metadata_file = file.parent / f"{file.stem}.json"
+                if metadata_file.exists():
+                    metadata_file.unlink()
+                deleted_count += 1
+                logger.info(f"Cleaned up old bulletin: {file.name}")
+
+        return jsonify({
+            'status': 'success',
+            'deleted': deleted_count,
+            'kept': kept_count,
+            'message': f'Deleted {deleted_count} old files, kept {kept_count}'
+        })
+
+    except Exception as e:
+        logger.error(f"Cleanup error: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/storage-info')
+def api_storage_info():
+    """Get storage usage information"""
+    try:
+        if not OUTPUT_DIR.exists():
+            return jsonify({'total_size': 0, 'file_count': 0, 'files': []})
+
+        mp3_files = list(OUTPUT_DIR.glob('*.mp3'))
+        total_size = sum(f.stat().st_size for f in mp3_files)
+
+        files_info = []
+        for file in sorted(mp3_files, key=lambda f: f.stat().st_mtime, reverse=True):
+            stat = file.stat()
+            age_days = (datetime.now() - datetime.fromtimestamp(stat.st_mtime)).days
+            files_info.append({
+                'filename': file.name,
+                'size': stat.st_size,
+                'age_days': age_days,
+                'modified': datetime.fromtimestamp(stat.st_mtime).isoformat()
+            })
+
+        return jsonify({
+            'total_size': total_size,
+            'file_count': len(mp3_files),
+            'files': files_info
+        })
+
+    except Exception as e:
+        logger.error(f"Storage info error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':

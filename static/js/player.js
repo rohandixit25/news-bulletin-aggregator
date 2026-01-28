@@ -13,6 +13,7 @@ const audio = document.getElementById('audio');
 const bulletinTitle = document.getElementById('bulletin-title');
 const bulletinProfile = document.getElementById('bulletin-profile');
 const bulletinDate = document.getElementById('bulletin-date');
+const offlineIndicator = document.getElementById('offline-indicator');
 
 const playPauseBtn = document.getElementById('play-pause');
 const playIcon = document.getElementById('play-icon');
@@ -21,6 +22,7 @@ const skipBackBtn = document.getElementById('skip-back');
 const skipForwardBtn = document.getElementById('skip-forward');
 const speedControl = document.getElementById('speed-control');
 const speedLabel = document.getElementById('speed-label');
+const downloadBtn = document.getElementById('download-btn');
 
 const progressFill = document.getElementById('progress-fill');
 const progressSlider = document.getElementById('progress-slider');
@@ -31,6 +33,7 @@ const duration = document.getElementById('duration');
 let bulletinData = null;
 let playbackSpeeds = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
 let currentSpeedIndex = 1; // Start at 1.0x
+let preferredSpeed = parseFloat(localStorage.getItem('preferredSpeed') || '1.0');
 
 /**
  * Initialize player on page load
@@ -75,11 +78,87 @@ function onMetadataLoaded() {
     duration.textContent = formatTime(audio.duration);
     progressSlider.max = audio.duration;
 
+    // Apply preferred speed
+    audio.playbackRate = preferredSpeed;
+    currentSpeedIndex = playbackSpeeds.indexOf(preferredSpeed);
+    if (currentSpeedIndex === -1) currentSpeedIndex = 1;
+    speedLabel.textContent = `${preferredSpeed.toFixed(2)}x`;
+
     // Setup Media Session API for lock screen controls
     setupMediaSession();
 
+    // Restore playback position if available
+    restorePlaybackPosition();
+
     // Auto-play on mobile (requires user gesture, so we just prepare)
     // User must tap play button first time
+}
+
+/**
+ * Check if audio is fully buffered (available offline)
+ */
+function checkOfflineAvailability() {
+    if (audio.buffered.length > 0) {
+        const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
+        const duration = audio.duration;
+
+        // Show offline indicator if >90% buffered
+        if (bufferedEnd / duration > 0.9) {
+            offlineIndicator.style.display = 'flex';
+        }
+    }
+}
+
+/**
+ * Save playback position to localStorage
+ */
+function savePlaybackPosition() {
+    if (bulletinData && audio.currentTime > 0 && audio.currentTime < audio.duration - 5) {
+        localStorage.setItem('lastBulletinFile', bulletinData.filename);
+        localStorage.setItem('lastPlaybackPosition', audio.currentTime.toString());
+        localStorage.setItem('lastPlaybackTime', Date.now().toString());
+    }
+}
+
+/**
+ * Restore playback position from localStorage
+ */
+function restorePlaybackPosition() {
+    try {
+        const savedFile = localStorage.getItem('lastBulletinFile');
+        const savedPosition = parseFloat(localStorage.getItem('lastPlaybackPosition') || '0');
+        const savedTime = parseInt(localStorage.getItem('lastPlaybackTime') || '0');
+
+        // Only restore if same file, valid position, and saved within last 24 hours
+        if (savedFile === bulletinData.filename &&
+            savedPosition > 5 &&
+            savedPosition < audio.duration - 5 &&
+            Date.now() - savedTime < 24 * 60 * 60 * 1000) {
+
+            audio.currentTime = savedPosition;
+
+            // Show toast notification
+            showToast(`Resuming from ${formatTime(savedPosition)}`);
+        }
+    } catch (e) {
+        console.log('Could not restore playback position:', e);
+    }
+}
+
+/**
+ * Show toast notification
+ */
+function showToast(message) {
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+
+    setTimeout(() => toast.classList.add('show'), 100);
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => document.body.removeChild(toast), 300);
+    }, 3000);
 }
 
 /**
@@ -219,6 +298,23 @@ speedControl.addEventListener('click', () => {
 });
 
 /**
+ * Download current bulletin
+ */
+downloadBtn.addEventListener('click', () => {
+    if (bulletinData && bulletinData.filename) {
+        // Create a temporary anchor element to trigger download
+        const downloadUrl = `/api/download/${bulletinData.filename}`;
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = bulletinData.filename;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+});
+
+/**
  * Update progress as audio plays
  */
 audio.addEventListener('timeupdate', () => {
@@ -230,6 +326,12 @@ audio.addEventListener('timeupdate', () => {
 
         // Update Media Session position periodically
         updateMediaSessionState();
+
+        // Check offline availability
+        checkOfflineAvailability();
+
+        // Save playback position
+        savePlaybackPosition();
     }
 });
 
@@ -249,7 +351,51 @@ progressSlider.addEventListener('input', (e) => {
 audio.addEventListener('ended', () => {
     updatePlayPauseButton();
     updateMediaSessionState();
+
+    // Show speed preset prompt if first time finishing a bulletin
+    showSpeedPresetPrompt();
 });
+
+/**
+ * Show speed preset prompt after first bulletin
+ */
+function showSpeedPresetPrompt() {
+    const hasSeenPrompt = localStorage.getItem('hasSeenSpeedPrompt');
+
+    if (!hasSeenPrompt) {
+        const modal = document.getElementById('speed-preset-modal');
+        modal.style.display = 'flex';
+
+        // Handle speed option clicks
+        document.querySelectorAll('.speed-option').forEach(button => {
+            button.addEventListener('click', () => {
+                const speed = parseFloat(button.dataset.speed);
+                setPreferredSpeed(speed);
+                modal.style.display = 'none';
+                localStorage.setItem('hasSeenSpeedPrompt', 'true');
+                showToast(`Default speed set to ${speed}x`);
+            });
+        });
+
+        // Handle skip button
+        document.getElementById('skip-speed-preset').addEventListener('click', () => {
+            modal.style.display = 'none';
+            localStorage.setItem('hasSeenSpeedPrompt', 'true');
+        });
+    }
+}
+
+/**
+ * Set preferred playback speed
+ */
+function setPreferredSpeed(speed) {
+    preferredSpeed = speed;
+    localStorage.setItem('preferredSpeed', speed.toString());
+    audio.playbackRate = speed;
+    speedLabel.textContent = `${speed.toFixed(2)}x`;
+    currentSpeedIndex = playbackSpeeds.indexOf(speed);
+    if (currentSpeedIndex === -1) currentSpeedIndex = 1;
+}
 
 /**
  * Handle play state changes
