@@ -542,7 +542,7 @@ def api_generate_stream():
 
             if output_file:
                 # Rename file to include profile name
-                profile_filename = f"{profile_id}_{output_file.name}"
+                profile_filename = f"{active_profile}_{output_file.name}"
                 profile_output = output_file.parent / profile_filename
                 output_file.rename(profile_output)
 
