@@ -531,19 +531,22 @@ def api_generate_stream():
                 yield f"data: {json.dumps({'stage': 'error', 'message': 'No sources enabled'})}\n\n"
                 return
 
-            # Create generator
+            # Create generator and set enabled sources
             generator = NewsBulletinAggregator(output_dir='output')
+            generator.news_sources = enabled_sources
 
             # Generate bulletin
             yield f"data: {json.dumps({'stage': 'fetching', 'message': 'Fetching bulletins from sources'})}\n\n"
 
-            output_file = generator.generate_bulletin(
-                sources=enabled_sources,
-                profile_name=profile_data['name']
-            )
+            output_file = generator.generate_daily_bulletin()
 
             if output_file:
-                yield f"data: {json.dumps({'stage': 'complete', 'message': 'Bulletin generated successfully', 'filename': output_file.name})}\n\n"
+                # Rename file to include profile name
+                profile_filename = f"{profile_id}_{output_file.name}"
+                profile_output = output_file.parent / profile_filename
+                output_file.rename(profile_output)
+
+                yield f"data: {json.dumps({'stage': 'complete', 'message': 'Bulletin generated successfully', 'filename': profile_filename})}\n\n"
             else:
                 yield f"data: {json.dumps({'stage': 'error', 'message': 'Failed to generate bulletin'})}\n\n"
 
