@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, send_file, Response, stream_with_context
 from pathlib import Path
 from main import NewsBulletinAggregator
-from enhanced_generator import EnhancedBulletinGenerator
 from email_sender import EmailSender
 from dotenv import load_dotenv
 
@@ -532,12 +531,21 @@ def api_generate_stream():
                 yield f"data: {json.dumps({'stage': 'error', 'message': 'No sources enabled'})}\n\n"
                 return
 
-            # Create enhanced generator
-            generator = EnhancedBulletinGenerator(output_dir='output')
+            # Create generator
+            generator = NewsBulletinAggregator(output_dir='output')
 
-            # Stream progress updates
-            for progress in generator.generate_with_progress(enabled_sources, profile_data['name']):
-                yield f"data: {json.dumps(progress)}\n\n"
+            # Generate bulletin
+            yield f"data: {json.dumps({'stage': 'fetching', 'message': 'Fetching bulletins from sources'})}\n\n"
+
+            output_file = generator.generate_bulletin(
+                sources=enabled_sources,
+                profile_name=profile_data['name']
+            )
+
+            if output_file:
+                yield f"data: {json.dumps({'stage': 'complete', 'message': 'Bulletin generated successfully', 'filename': output_file.name})}\n\n"
+            else:
+                yield f"data: {json.dumps({'stage': 'error', 'message': 'Failed to generate bulletin'})}\n\n"
 
         except Exception as e:
             logger.error(f"Stream generation error: {str(e)}")
