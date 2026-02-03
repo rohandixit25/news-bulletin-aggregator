@@ -11,8 +11,12 @@ let deviceId = null;
 function setCookie(name, value, days) {
     const expires = new Date();
     expires.setTime(expires.getTime() + (days * 24 * 60 * 60 * 1000));
-    document.cookie = `${name}=${value};expires=${expires.toUTCString()};path=/;SameSite=Lax`;
-    console.log('Set cookie:', name, '=', value);
+
+    // Add Secure flag for HTTPS sites (like Render)
+    const isSecure = window.location.protocol === 'https:' ? ';Secure' : '';
+    document.cookie = `${name}=${value};expires=${expires.toUTCString()};path=/;SameSite=Lax${isSecure}`;
+
+    console.log('Set cookie:', name, '=', value, 'on', window.location.hostname, '(Secure:', isSecure !== '', ')');
 }
 
 function getCookie(name) {
