@@ -1067,11 +1067,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     deviceId = getDeviceId();
     console.log('Device ID:', deviceId);
 
-    // Load profiles and check for linked profile
+    // Load profiles
     await loadProfiles();
-
-    // Show onboarding if device has no linked profile
-    await showOnboarding();
 
     // Load other data
     loadRecentFiles();
