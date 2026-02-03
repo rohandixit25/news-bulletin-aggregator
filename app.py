@@ -532,23 +532,36 @@ def api_generate_stream():
                 return
 
             # Create generator and set enabled sources
+            logger.info(f"Creating generator with {len(enabled_sources)} sources")
             generator = NewsBulletinAggregator(output_dir='output')
             generator.news_sources = enabled_sources
 
             # Generate bulletin
-            yield f"data: {json.dumps({'stage': 'fetching', 'message': 'Fetching bulletins from sources'})}\n\n"
+            yield f"data: {json.dumps({'stage': 'fetching', 'message': f'Fetching bulletins from {len(enabled_sources)} sources'})}\n\n"
 
+            logger.info("Starting bulletin generation...")
             output_file = generator.generate_daily_bulletin()
+            logger.info(f"Generation complete. Output file: {output_file}")
 
             if output_file:
                 # Rename file to include profile name
                 profile_filename = f"{active_profile}_{output_file.name}"
                 profile_output = output_file.parent / profile_filename
+                logger.info(f"Renaming {output_file} to {profile_output}")
                 output_file.rename(profile_output)
+                logger.info(f"File saved: {profile_output}")
 
-                yield f"data: {json.dumps({'stage': 'complete', 'message': 'Bulletin generated successfully', 'filename': profile_filename})}\n\n"
+                # Verify file exists
+                if profile_output.exists():
+                    file_size = profile_output.stat().st_size
+                    logger.info(f"✅ File verified: {profile_output} ({file_size} bytes)")
+                    yield f"data: {json.dumps({'stage': 'complete', 'message': 'Bulletin generated successfully', 'filename': profile_filename, 'size': file_size})}\n\n"
+                else:
+                    logger.error(f"❌ File not found after rename: {profile_output}")
+                    yield f"data: {json.dumps({'stage': 'error', 'message': 'File was created but disappeared'})}\n\n"
             else:
-                yield f"data: {json.dumps({'stage': 'error', 'message': 'Failed to generate bulletin'})}\n\n"
+                logger.error("❌ Generation returned None")
+                yield f"data: {json.dumps({'stage': 'error', 'message': 'No audio files were downloaded successfully'})}\n\n"
 
         except Exception as e:
             logger.error(f"Stream generation error: {str(e)}")
