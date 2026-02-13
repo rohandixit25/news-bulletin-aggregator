@@ -5,12 +5,16 @@ Flask application with Quantium branding
 """
 
 import os
+import fcntl
 import json
 import logging
+import threading
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, jsonify, send_file, Response, stream_with_context
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from flask import Flask, render_template, request, jsonify, send_file, Response, stream_with_context, redirect
 from pathlib import Path
 from main import NewsBulletinAggregator
+from enhanced_generator import EnhancedBulletinGenerator
 from email_sender import EmailSender
 from dotenv import load_dotenv
 
@@ -22,10 +26,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'news-bulletin-aggregator-secret-key'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(24).hex())
 
 CONFIG_FILE = Path('config.json')
 OUTPUT_DIR = Path('output')
+
+# Scheduler instance (initialised in main block)
+bulletin_scheduler = None
 
 # Default sources (available to all profiles)
 DEFAULT_SOURCES = {
@@ -81,10 +88,17 @@ DEFAULT_CONFIG = {
 
 
 def load_config():
-    """Load configuration from file or return defaults"""
+    """Load configuration from file with shared file lock"""
     if CONFIG_FILE.exists():
         with open(CONFIG_FILE, 'r') as f:
-            config = json.load(f)
+            fcntl.flock(f, fcntl.LOCK_SH)
+            try:
+                config = json.load(f)
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+
+            needs_save = False
+
             # Migrate old config format to new profile-based format
             if 'profiles' not in config:
                 config = {
@@ -97,19 +111,44 @@ def load_config():
                     },
                     'device_profiles': {}
                 }
-                save_config(config)
+                needs_save = True
+
             # Add device_profiles if missing
             if 'device_profiles' not in config:
                 config['device_profiles'] = {}
+                needs_save = True
+
+            # Migrate: add source ordering if missing
+            for profile_id, profile in config['profiles'].items():
+                sources = profile.get('sources', {})
+                has_order = any('order' in s for s in sources.values() if isinstance(s, dict))
+                if not has_order and sources:
+                    for idx, (name, data) in enumerate(sources.items()):
+                        if isinstance(data, dict):
+                            data['order'] = idx
+                    needs_save = True
+
+            # Migrate: add schedule if missing
+            for profile_id, profile in config['profiles'].items():
+                if 'schedule' not in profile:
+                    profile['schedule'] = {'enabled': False, 'time': '06:00', 'timezone': 'Australia/Sydney'}
+                    needs_save = True
+
+            if needs_save:
                 save_config(config)
+
             return config
     return DEFAULT_CONFIG
 
 
 def save_config(config):
-    """Save configuration to file"""
+    """Save configuration to file with exclusive file lock"""
     with open(CONFIG_FILE, 'w') as f:
-        json.dump(config, f, indent=2)
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            json.dump(config, f, indent=2)
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 @app.route('/')
@@ -262,6 +301,62 @@ def api_custom_source(profile_id):
         return jsonify({'status': 'error', 'message': 'Source not found'}), 404
 
 
+@app.route('/api/profiles/<profile_id>/sources/reorder', methods=['POST'])
+def api_reorder_sources(profile_id):
+    """Reorder sources for a profile"""
+    config = load_config()
+
+    if profile_id not in config['profiles']:
+        return jsonify({'status': 'error', 'message': 'Profile not found'}), 404
+
+    data = request.json
+    order_list = data.get('order', [])
+
+    if not order_list:
+        return jsonify({'status': 'error', 'message': 'Order list required'}), 400
+
+    sources = config['profiles'][profile_id]['sources']
+    for idx, source_name in enumerate(order_list):
+        if source_name in sources:
+            sources[source_name]['order'] = idx
+
+    save_config(config)
+    return jsonify({'status': 'success'})
+
+
+@app.route('/api/profiles/<profile_id>/staleness')
+def api_staleness(profile_id):
+    """Check staleness of all enabled sources for a profile"""
+    config = load_config()
+
+    if profile_id not in config['profiles']:
+        return jsonify({'status': 'error', 'message': 'Profile not found'}), 404
+
+    profile_data = config['profiles'][profile_id]
+    enabled_sources = {
+        name: data['url']
+        for name, data in profile_data['sources'].items()
+        if isinstance(data, dict) and data.get('enabled')
+    }
+
+    aggregator = NewsBulletinAggregator(output_dir='output')
+    results = {}
+
+    def _check(name, url):
+        return name, aggregator.check_feed_staleness(name, url)
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(_check, n, u) for n, u in enabled_sources.items()]
+        for future in as_completed(futures):
+            try:
+                name, staleness = future.result()
+                results[name] = staleness
+            except Exception as e:
+                logger.error(f"Staleness check error: {str(e)}")
+
+    return jsonify({'staleness': results})
+
+
 @app.route('/api/device/<device_id>/profile', methods=['GET', 'POST'])
 def api_device_profile(device_id):
     """Get or set profile for a device"""
@@ -295,55 +390,53 @@ def api_device_profile(device_id):
         return jsonify({'status': 'success', 'device_id': device_id, 'profile_id': profile_id})
 
 
+def get_enabled_sources_ordered(profile_data):
+    """Get enabled sources sorted by their order field."""
+    sources = profile_data.get('sources', {})
+    enabled = {
+        name: data
+        for name, data in sources.items()
+        if isinstance(data, dict) and data.get('enabled')
+    }
+    # Sort by order field, defaulting to 999 if missing
+    sorted_items = sorted(enabled.items(), key=lambda x: x[1].get('order', 999))
+    return {name: data['url'] for name, data in sorted_items}
+
+
 @app.route('/api/generate', methods=['POST'])
 def api_generate():
-    """Generate news bulletin with current configuration"""
+    """Generate news bulletin with current configuration using enhanced generator"""
     try:
         config = load_config()
         active_profile = config['active_profile']
         profile_data = config['profiles'][active_profile]
 
-        # Create aggregator
-        aggregator = NewsBulletinAggregator(output_dir='output')
+        enabled_sources = get_enabled_sources_ordered(profile_data)
 
-        # Get enabled sources from active profile
-        enabled_sources = {
-            name: data['url']
-            for name, data in profile_data['sources'].items()
-            if data['enabled']
-        }
-        aggregator.news_sources = enabled_sources
-
-        # Fetch bulletins
-        downloaded_files = []
-        for source_name, feed_url in enabled_sources.items():
-            audio_file = aggregator.fetch_latest_bulletin(source_name, feed_url)
-            if audio_file:
-                downloaded_files.append(audio_file)
-
-        if not downloaded_files:
+        if not enabled_sources:
             return jsonify({
                 'status': 'error',
-                'message': 'No audio files were downloaded successfully'
-            }), 500
+                'message': 'No sources enabled'
+            }), 400
 
-        # Create unique filename with profile name and timestamp
-        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        profile_slug = active_profile.replace(' ', '_').lower()
-        output_filename = f"{profile_slug}_{timestamp}.mp3"
+        generator = EnhancedBulletinGenerator(output_dir='output')
+        result = None
 
-        # Combine bulletins
-        output_file = aggregator.combine_audio_files(downloaded_files, output_filename)
+        for event in generator.generate_with_progress(enabled_sources, active_profile):
+            if event.get('stage') == 'complete':
+                result = event
+            elif event.get('stage') == 'error':
+                return jsonify({
+                    'status': 'error',
+                    'message': event.get('message', 'Generation failed')
+                }), 500
 
-        # Cleanup temp files
-        aggregator.cleanup_temp_files()
-
-        if output_file:
+        if result:
             return jsonify({
                 'status': 'success',
                 'message': 'Bulletin generated successfully',
-                'file': str(output_file),
-                'filename': output_file.name
+                'filename': result['filename'],
+                'size': result.get('size', 0)
             })
         else:
             return jsonify({
@@ -356,6 +449,54 @@ def api_generate():
             'status': 'error',
             'message': str(e)
         }), 500
+
+
+@app.route('/api/generate/trigger', methods=['POST', 'GET'])
+def api_generate_trigger():
+    """Trigger bulletin generation in background. Returns immediately.
+    Used by external cron services to wake the app and start generation.
+    Requires CRON_SECRET token if set in environment."""
+    cron_secret = os.environ.get('CRON_SECRET')
+    if cron_secret:
+        token = request.args.get('token') or request.headers.get('X-Cron-Secret')
+        if token != cron_secret:
+            return jsonify({'status': 'error', 'message': 'Unauthorised'}), 401
+
+    profile_id = request.args.get('profile', None)
+
+    def _run_generation(app_context, pid):
+        with app_context:
+            try:
+                config = load_config()
+                target_profile = pid or config['active_profile']
+                if target_profile not in config['profiles']:
+                    logger.error(f"Trigger: profile {target_profile} not found")
+                    return
+                profile_data = config['profiles'][target_profile]
+                enabled_sources = get_enabled_sources_ordered(profile_data)
+                if not enabled_sources:
+                    logger.warning(f"Trigger: no enabled sources for {target_profile}")
+                    return
+                generator = EnhancedBulletinGenerator(output_dir='output')
+                for event in generator.generate_with_progress(enabled_sources, target_profile):
+                    if event.get('stage') == 'complete':
+                        logger.info(f"Trigger: bulletin complete - {event.get('filename')}")
+                    elif event.get('stage') == 'error':
+                        logger.error(f"Trigger: generation error - {event.get('message')}")
+            except Exception as e:
+                logger.error(f"Trigger: generation failed - {e}")
+
+    thread = threading.Thread(
+        target=_run_generation,
+        args=(app.app_context(), profile_id),
+        daemon=True
+    )
+    thread.start()
+
+    return jsonify({
+        'status': 'success',
+        'message': 'Bulletin generation started in background'
+    })
 
 
 @app.route('/api/download/<filename>')
@@ -454,8 +595,8 @@ def api_email_bulletin(filename):
 
 @app.route('/player')
 def player():
-    """Mobile audio player page"""
-    return render_template('player.html')
+    """Redirect old player URL to unified app"""
+    return redirect('/', code=301)
 
 
 @app.route('/api/latest-bulletin')
@@ -513,55 +654,24 @@ def api_latest_bulletin():
 
 @app.route('/api/generate/stream')
 def api_generate_stream():
-    """Generate bulletin with Server-Sent Events progress updates"""
+    """Generate bulletin with Server-Sent Events progress updates using enhanced generator"""
     def generate():
         try:
             config = load_config()
             active_profile = config['active_profile']
             profile_data = config['profiles'][active_profile]
 
-            # Get enabled sources
-            enabled_sources = {
-                name: data['url']
-                for name, data in profile_data['sources'].items()
-                if data['enabled']
-            }
+            enabled_sources = get_enabled_sources_ordered(profile_data)
 
             if not enabled_sources:
                 yield f"data: {json.dumps({'stage': 'error', 'message': 'No sources enabled'})}\n\n"
                 return
 
-            # Create generator and set enabled sources
-            logger.info(f"Creating generator with {len(enabled_sources)} sources")
-            generator = NewsBulletinAggregator(output_dir='output')
-            generator.news_sources = enabled_sources
+            logger.info(f"Starting enhanced generation with {len(enabled_sources)} sources")
+            generator = EnhancedBulletinGenerator(output_dir='output')
 
-            # Generate bulletin
-            yield f"data: {json.dumps({'stage': 'fetching', 'message': f'Fetching bulletins from {len(enabled_sources)} sources'})}\n\n"
-
-            logger.info("Starting bulletin generation...")
-            output_file = generator.generate_daily_bulletin()
-            logger.info(f"Generation complete. Output file: {output_file}")
-
-            if output_file:
-                # Rename file to include profile name
-                profile_filename = f"{active_profile}_{output_file.name}"
-                profile_output = output_file.parent / profile_filename
-                logger.info(f"Renaming {output_file} to {profile_output}")
-                output_file.rename(profile_output)
-                logger.info(f"File saved: {profile_output}")
-
-                # Verify file exists
-                if profile_output.exists():
-                    file_size = profile_output.stat().st_size
-                    logger.info(f"✅ File verified: {profile_output} ({file_size} bytes)")
-                    yield f"data: {json.dumps({'stage': 'complete', 'message': 'Bulletin generated successfully', 'filename': profile_filename, 'size': file_size})}\n\n"
-                else:
-                    logger.error(f"❌ File not found after rename: {profile_output}")
-                    yield f"data: {json.dumps({'stage': 'error', 'message': 'File was created but disappeared'})}\n\n"
-            else:
-                logger.error("❌ Generation returned None")
-                yield f"data: {json.dumps({'stage': 'error', 'message': 'No audio files were downloaded successfully'})}\n\n"
+            for event in generator.generate_with_progress(enabled_sources, active_profile):
+                yield f"data: {json.dumps(event, default=str)}\n\n"
 
         except Exception as e:
             logger.error(f"Stream generation error: {str(e)}")
@@ -657,6 +767,53 @@ def api_test_source():
         }), 500
 
 
+@app.route('/api/profiles/<profile_id>/schedule', methods=['GET', 'PUT'])
+def api_profile_schedule(profile_id):
+    """Get or update schedule for a profile"""
+    config = load_config()
+
+    if profile_id not in config['profiles']:
+        return jsonify({'status': 'error', 'message': 'Profile not found'}), 404
+
+    if request.method == 'GET':
+        schedule = config['profiles'][profile_id].get('schedule', {
+            'enabled': False, 'time': '06:00', 'timezone': 'Australia/Sydney'
+        })
+        return jsonify({'schedule': schedule})
+
+    elif request.method == 'PUT':
+        data = request.json or {}
+        schedule = {
+            'enabled': data.get('enabled', False),
+            'time': data.get('time', '06:00'),
+            'timezone': data.get('timezone', 'Australia/Sydney')
+        }
+
+        config['profiles'][profile_id]['schedule'] = schedule
+        save_config(config)
+
+        # Update scheduler
+        if bulletin_scheduler:
+            if schedule['enabled']:
+                bulletin_scheduler.add_schedule(
+                    profile_id,
+                    schedule['time'],
+                    schedule['timezone']
+                )
+            else:
+                bulletin_scheduler.remove_schedule(profile_id)
+
+        return jsonify({'status': 'success', 'schedule': schedule})
+
+
+@app.route('/api/schedules')
+def api_schedules():
+    """List all active schedules with next run times"""
+    if bulletin_scheduler:
+        return jsonify({'schedules': bulletin_scheduler.get_schedules()})
+    return jsonify({'schedules': []})
+
+
 @app.route('/api/cleanup', methods=['POST'])
 def api_cleanup():
     """Clean up old bulletin files"""
@@ -735,9 +892,14 @@ def api_storage_info():
         return jsonify({'error': str(e)}), 500
 
 
-if __name__ == '__main__':
-    # Ensure output directory exists
-    OUTPUT_DIR.mkdir(exist_ok=True)
+# Ensure output directory exists
+OUTPUT_DIR.mkdir(exist_ok=True)
 
+# Initialise scheduler (runs under both gunicorn and dev server)
+from scheduler import BulletinScheduler
+bulletin_scheduler = BulletinScheduler()
+bulletin_scheduler.init_app(app)
+
+if __name__ == '__main__':
     # Run Flask development server
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)

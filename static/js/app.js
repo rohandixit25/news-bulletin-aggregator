@@ -1,1077 +1,1035 @@
 /**
- * News Bulletin Aggregator - Frontend JavaScript (Multi-Profile)
+ * News Bulletin Aggregator — Unified App
+ * Merges player, sources, and settings into a single-page tabbed app.
  */
 
-// Global state
+// ==================== STATE ====================
 let currentProfileId = null;
 let profiles = {};
 let deviceId = null;
+let bulletinData = null;
+let bulletinChapters = [];
+let currentEmailFilename = null;
 
-// Cookie helper functions
+// Player state
+const playbackSpeeds = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+let currentSpeedIndex = 1;
+let preferredSpeed = parseFloat(localStorage.getItem('preferredSpeed') || '1.0');
+
+// ==================== HELPERS ====================
 function setCookie(name, value, days) {
     const expires = new Date();
     expires.setTime(expires.getTime() + (days * 24 * 60 * 60 * 1000));
-
-    // Add Secure flag for HTTPS sites (like Render)
-    const isSecure = window.location.protocol === 'https:' ? ';Secure' : '';
+    const isSecure = location.protocol === 'https:' ? ';Secure' : '';
     document.cookie = `${name}=${value};expires=${expires.toUTCString()};path=/;SameSite=Lax${isSecure}`;
-
-    console.log('Set cookie:', name, '=', value, 'on', window.location.hostname, '(Secure:', isSecure !== '', ')');
 }
 
 function getCookie(name) {
-    const nameEQ = name + "=";
-    const ca = document.cookie.split(';');
-    for (let i = 0; i < ca.length; i++) {
-        let c = ca[i];
-        while (c.charAt(0) == ' ') c = c.substring(1, c.length);
-        if (c.indexOf(nameEQ) == 0) {
-            const value = c.substring(nameEQ.length, c.length);
-            console.log('Retrieved cookie:', name, '=', value);
-            return value;
-        }
-    }
-    console.log('Cookie not found:', name);
-    return null;
+    const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+    return match ? match[2] : null;
 }
 
-// Generate or retrieve device ID using cookies
 function getDeviceId() {
     let id = getCookie('deviceId');
-
     if (!id) {
         id = 'device_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-        console.log('Generated new deviceId:', id);
-        setCookie('deviceId', id, 365); // Store for 1 year
+        setCookie('deviceId', id, 365);
     }
-
     return id;
 }
 
-// DOM Elements
-const profileSelector = document.getElementById('profile-selector');
-const newProfileBtn = document.getElementById('new-profile-btn');
-const deleteProfileBtn = document.getElementById('delete-profile-btn');
-const saveConfigBtn = document.getElementById('save-config-btn');
-const generateBtn = document.getElementById('generate-btn');
-const addCustomSourceBtn = document.getElementById('add-custom-source-btn');
-const statusMessage = document.getElementById('status-message');
-const generationProgress = document.getElementById('generation-progress');
-const recentFilesList = document.getElementById('recent-files-list');
-const profileNameDisplay = document.getElementById('profile-name-display');
-
-// Modal elements
-const customSourceModal = document.getElementById('custom-source-modal');
-const newProfileModal = document.getElementById('new-profile-modal');
-const emailModal = document.getElementById('email-modal');
-const cancelCustomSourceBtn = document.getElementById('cancel-custom-source-btn');
-const saveCustomSourceBtn = document.getElementById('save-custom-source-btn');
-const cancelNewProfileBtn = document.getElementById('cancel-new-profile-btn');
-const saveNewProfileBtn = document.getElementById('save-new-profile-btn');
-const cancelEmailBtn = document.getElementById('cancel-email-btn');
-const sendEmailBtn = document.getElementById('send-email-btn');
-const recipientEmailInput = document.getElementById('recipient-email');
-
-// Show status message
-function showStatus(message, type = 'info') {
-    statusMessage.textContent = message;
-    statusMessage.className = `status-message ${type}`;
-    statusMessage.style.display = 'block';
-
-    setTimeout(() => {
-        statusMessage.style.display = 'none';
-    }, 5000);
-}
-
-// Format file size
 function formatFileSize(bytes) {
-    if (bytes === 0) return '0 Bytes';
+    if (bytes === 0) return '0 B';
     const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
 }
 
-// Format date
-function formatDate(isoString) {
-    const date = new Date(isoString);
-    const options = {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-    };
-    return date.toLocaleDateString('en-AU', options);
+function formatDate(dateString) {
+    try {
+        const date = new Date(dateString);
+        const today = new Date();
+        if (date.toDateString() === today.toDateString()) return 'Today';
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+        return date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+    } catch { return dateString; }
 }
 
-// Get current sources configuration from checkboxes
-function getCurrentSources() {
-    const checkboxes = document.querySelectorAll('input[name="source"]');
-    const sources = {};
+function formatTime(seconds) {
+    if (isNaN(seconds)) return '0:00';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    const pad = n => n.toString().padStart(2, '0');
+    return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
 
-    checkboxes.forEach(checkbox => {
-        const name = checkbox.value;
-        const sourceItem = checkbox.closest('.source-item');
-        const description = sourceItem.querySelector('.source-description').textContent;
-        const isCustom = checkbox.dataset.custom === 'true';
+function showToast(message) {
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.classList.add('show'), 50);
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 2500);
+}
 
-        sources[name] = {
-            enabled: checkbox.checked,
-            url: checkbox.dataset.url,
-            description: description,
-            custom: isCustom
-        };
+// ==================== 1. TAB NAVIGATION ====================
+function switchTab(tabId) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+    const tab = document.getElementById('tab-' + tabId);
+    if (tab) tab.classList.add('active');
+    const btn = document.querySelector(`.nav-item[data-tab="${tabId}"]`);
+    if (btn) btn.classList.add('active');
+
+    // Trigger data loads on tab switch
+    if (tabId === 'sources') {
+        checkStaleness();
+    } else if (tabId === 'settings') {
+        loadRecentFiles();
+        loadStorageInfo();
+        loadSchedule();
+    }
+}
+
+document.querySelectorAll('.nav-item').forEach(btn => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+});
+
+// ==================== 2. PLAYER ====================
+const audio = document.getElementById('audio');
+const playPauseBtn = document.getElementById('play-pause');
+const playIcon = document.getElementById('play-icon');
+const pauseIcon = document.getElementById('pause-icon');
+const skipBackBtn = document.getElementById('skip-back');
+const skipForwardBtn = document.getElementById('skip-forward');
+const speedControl = document.getElementById('speed-control');
+const speedLabel = document.getElementById('speed-label');
+const downloadBtn = document.getElementById('download-btn');
+const progressFill = document.getElementById('progress-fill');
+const progressSlider = document.getElementById('progress-slider');
+const currentTimeEl = document.getElementById('current-time');
+const durationEl = document.getElementById('duration');
+
+async function loadLatestBulletin() {
+    const loading = document.getElementById('player-loading');
+    const error = document.getElementById('player-error');
+    const section = document.getElementById('player-section');
+
+    loading.style.display = 'flex';
+    error.style.display = 'none';
+    section.style.display = 'none';
+
+    try {
+        const res = await fetch('/api/latest-bulletin');
+        if (!res.ok) throw new Error('No bulletin available');
+        bulletinData = await res.json();
+
+        document.getElementById('bulletin-title').textContent = "Today's News Bulletin";
+        document.getElementById('bulletin-profile').textContent = bulletinData.profile_name || 'News';
+        document.getElementById('bulletin-date').textContent = formatDate(bulletinData.date);
+
+        audio.src = `/api/download/${bulletinData.filename}`;
+
+        // Load metadata for chapters
+        loadBulletinChapters(bulletinData.filename);
+    } catch (err) {
+        loading.style.display = 'none';
+        error.style.display = 'flex';
+        document.getElementById('player-error-message').textContent =
+            err.message || 'Unable to load bulletin';
+    }
+}
+
+async function loadBulletinChapters(filename) {
+    try {
+        const res = await fetch(`/api/bulletin/${filename}/metadata`);
+        if (res.ok) {
+            const meta = await res.json();
+            bulletinChapters = meta.chapters || [];
+        }
+    } catch { bulletinChapters = []; }
+}
+
+function renderChapterMarkers() {
+    const markersEl = document.getElementById('chapter-markers');
+    const listEl = document.getElementById('chapter-list');
+    markersEl.innerHTML = '';
+
+    if (!bulletinChapters.length || !audio.duration) {
+        listEl.style.display = 'none';
+        return;
+    }
+
+    const totalMs = audio.duration * 1000;
+
+    // Tick marks on progress bar
+    bulletinChapters.forEach(ch => {
+        if (ch.start_ms > 0) {
+            const tick = document.createElement('div');
+            tick.className = 'chapter-tick';
+            tick.style.left = `${(ch.start_ms / totalMs) * 100}%`;
+            markersEl.appendChild(tick);
+        }
     });
 
-    return sources;
-}
+    // Chapter list below player
+    listEl.style.display = 'block';
+    listEl.innerHTML = bulletinChapters.map((ch, i) => `
+        <div class="chapter-item" data-index="${i}" data-start="${ch.start_ms}">
+            <span>${ch.name}</span>
+            <span class="chapter-time">${formatTime(ch.start_ms / 1000)}</span>
+        </div>
+    `).join('');
 
-// Check if device has linked profile
-async function getDeviceProfile() {
-    try {
-        const response = await fetch(`/api/device/${deviceId}/profile`);
-        const data = await response.json();
-
-        if (response.ok && data.profile_id) {
-            return data.profile_id;
-        }
-        return null;
-    } catch (error) {
-        console.error('Error getting device profile:', error);
-        return null;
-    }
-}
-
-// Link device to profile
-async function linkDeviceToProfile(profileId) {
-    try {
-        await fetch(`/api/device/${deviceId}/profile`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ profile_id: profileId })
+    listEl.querySelectorAll('.chapter-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const startMs = parseInt(item.dataset.start);
+            audio.currentTime = startMs / 1000;
+            if (audio.paused) audio.play();
         });
-    } catch (error) {
-        console.error('Error linking device to profile:', error);
+    });
+}
+
+function updateNowPlaying() {
+    const nowPlaying = document.getElementById('now-playing');
+    const sourceEl = document.getElementById('now-playing-source');
+
+    if (!bulletinChapters.length) {
+        nowPlaying.style.display = 'none';
+        return;
+    }
+
+    const currentMs = audio.currentTime * 1000;
+    let currentChapter = bulletinChapters[0];
+
+    for (const ch of bulletinChapters) {
+        if (currentMs >= ch.start_ms) {
+            currentChapter = ch;
+        }
+    }
+
+    if (currentChapter) {
+        nowPlaying.style.display = 'block';
+        sourceEl.textContent = currentChapter.name;
+
+        // Highlight active chapter in list
+        document.querySelectorAll('.chapter-item').forEach(item => {
+            item.classList.toggle('active', parseInt(item.dataset.start) === currentChapter.start_ms);
+        });
     }
 }
 
-// Load profiles from server
+// Audio event listeners
+audio.addEventListener('loadedmetadata', () => {
+    document.getElementById('player-loading').style.display = 'none';
+    document.getElementById('player-section').style.display = 'flex';
+
+    durationEl.textContent = formatTime(audio.duration);
+    progressSlider.max = audio.duration;
+
+    audio.playbackRate = preferredSpeed;
+    currentSpeedIndex = playbackSpeeds.indexOf(preferredSpeed);
+    if (currentSpeedIndex === -1) currentSpeedIndex = 1;
+    speedLabel.textContent = `${preferredSpeed}x`;
+
+    setupMediaSession();
+    restorePlaybackPosition();
+    renderChapterMarkers();
+});
+
+audio.addEventListener('error', () => {
+    document.getElementById('player-loading').style.display = 'none';
+    document.getElementById('player-error').style.display = 'flex';
+    document.getElementById('player-error-message').textContent = 'Failed to load audio file';
+});
+
+audio.addEventListener('timeupdate', () => {
+    if (isNaN(audio.duration)) return;
+    const pct = (audio.currentTime / audio.duration) * 100;
+    progressFill.style.width = `${pct}%`;
+    progressSlider.value = audio.currentTime;
+    currentTimeEl.textContent = formatTime(audio.currentTime);
+    updateNowPlaying();
+    updateMediaSessionState();
+    savePlaybackPosition();
+});
+
+audio.addEventListener('play', updatePlayPauseIcon);
+audio.addEventListener('pause', updatePlayPauseIcon);
+audio.addEventListener('ended', () => {
+    updatePlayPauseIcon();
+    showSpeedPresetPrompt();
+});
+
+function updatePlayPauseIcon() {
+    playIcon.style.display = audio.paused ? 'block' : 'none';
+    pauseIcon.style.display = audio.paused ? 'none' : 'block';
+}
+
+playPauseBtn.addEventListener('click', () => {
+    audio.paused ? audio.play() : audio.pause();
+});
+
+skipBackBtn.addEventListener('click', () => {
+    audio.currentTime = Math.max(0, audio.currentTime - 15);
+});
+
+skipForwardBtn.addEventListener('click', () => {
+    audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + 15);
+});
+
+speedControl.addEventListener('click', () => {
+    currentSpeedIndex = (currentSpeedIndex + 1) % playbackSpeeds.length;
+    const speed = playbackSpeeds[currentSpeedIndex];
+    audio.playbackRate = speed;
+    speedLabel.textContent = `${speed}x`;
+    preferredSpeed = speed;
+    localStorage.setItem('preferredSpeed', speed.toString());
+});
+
+progressSlider.addEventListener('input', e => {
+    const t = parseFloat(e.target.value);
+    audio.currentTime = t;
+    progressFill.style.width = `${(t / audio.duration) * 100}%`;
+    currentTimeEl.textContent = formatTime(t);
+});
+
+downloadBtn.addEventListener('click', () => {
+    if (bulletinData?.filename) {
+        const a = document.createElement('a');
+        a.href = `/api/download/${bulletinData.filename}`;
+        a.download = bulletinData.filename;
+        a.click();
+    }
+});
+
+// Media Session API
+function setupMediaSession() {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.metadata = new MediaMetadata({
+        title: "Today's News Bulletin",
+        artist: bulletinData?.profile_name || 'News Bulletin',
+        album: 'Daily News',
+        artwork: [
+            { src: '/static/icons/icon-96.png', sizes: '96x96', type: 'image/png' },
+            { src: '/static/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+            { src: '/static/icons/icon-512.png', sizes: '512x512', type: 'image/png' }
+        ]
+    });
+
+    navigator.mediaSession.setActionHandler('play', () => { audio.play(); });
+    navigator.mediaSession.setActionHandler('pause', () => { audio.pause(); });
+    navigator.mediaSession.setActionHandler('seekbackward', d => {
+        audio.currentTime = Math.max(0, audio.currentTime - (d.seekOffset || 15));
+    });
+    navigator.mediaSession.setActionHandler('seekforward', d => {
+        audio.currentTime = Math.min(audio.duration, audio.currentTime + (d.seekOffset || 15));
+    });
+    navigator.mediaSession.setActionHandler('seekto', d => {
+        audio.currentTime = d.seekTime;
+    });
+}
+
+function updateMediaSessionState() {
+    if (!('mediaSession' in navigator) || !audio.duration) return;
+    navigator.mediaSession.playbackState = audio.paused ? 'paused' : 'playing';
+    try {
+        navigator.mediaSession.setPositionState({
+            duration: audio.duration,
+            playbackRate: audio.playbackRate,
+            position: audio.currentTime
+        });
+    } catch {}
+}
+
+// Playback position persistence
+function savePlaybackPosition() {
+    if (bulletinData && audio.currentTime > 0 && audio.currentTime < audio.duration - 5) {
+        localStorage.setItem('lastBulletinFile', bulletinData.filename);
+        localStorage.setItem('lastPlaybackPosition', audio.currentTime.toString());
+        localStorage.setItem('lastPlaybackTime', Date.now().toString());
+    }
+}
+
+function restorePlaybackPosition() {
+    try {
+        const savedFile = localStorage.getItem('lastBulletinFile');
+        const savedPos = parseFloat(localStorage.getItem('lastPlaybackPosition') || '0');
+        const savedTime = parseInt(localStorage.getItem('lastPlaybackTime') || '0');
+
+        if (savedFile === bulletinData?.filename && savedPos > 5 &&
+            savedPos < audio.duration - 5 && Date.now() - savedTime < 86400000) {
+            audio.currentTime = savedPos;
+            showToast(`Resuming from ${formatTime(savedPos)}`);
+        }
+    } catch {}
+}
+
+// Wake Lock
+if ('wakeLock' in navigator) {
+    let wakeLock = null;
+    audio.addEventListener('play', async () => {
+        try { wakeLock = await navigator.wakeLock.request('screen'); } catch {}
+    });
+    audio.addEventListener('pause', () => {
+        if (wakeLock) { wakeLock.release(); wakeLock = null; }
+    });
+}
+
+// Speed preset prompt
+function showSpeedPresetPrompt() {
+    if (localStorage.getItem('hasSeenSpeedPrompt')) return;
+    const modal = document.getElementById('speed-preset-modal');
+    modal.style.display = 'flex';
+}
+
+document.querySelectorAll('.speed-option').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const speed = parseFloat(btn.dataset.speed);
+        preferredSpeed = speed;
+        localStorage.setItem('preferredSpeed', speed.toString());
+        audio.playbackRate = speed;
+        speedLabel.textContent = `${speed}x`;
+        currentSpeedIndex = playbackSpeeds.indexOf(speed);
+        if (currentSpeedIndex === -1) currentSpeedIndex = 1;
+        document.getElementById('speed-preset-modal').style.display = 'none';
+        localStorage.setItem('hasSeenSpeedPrompt', 'true');
+        showToast(`Default speed set to ${speed}x`);
+    });
+});
+
+document.getElementById('skip-speed-preset')?.addEventListener('click', () => {
+    document.getElementById('speed-preset-modal').style.display = 'none';
+    localStorage.setItem('hasSeenSpeedPrompt', 'true');
+});
+
+// ==================== 3. SOURCES ====================
 async function loadProfiles() {
     try {
-        // Check if device has a linked profile
-        const linkedProfileId = await getDeviceProfile();
-        console.log('Linked profile:', linkedProfileId);
+        const deviceRes = await fetch(`/api/device/${deviceId}/profile`);
+        const deviceData = await deviceRes.json();
+        const linkedProfileId = deviceData.profile_id;
 
-        const response = await fetch('/api/profiles');
-        const data = await response.json();
-
+        const res = await fetch('/api/profiles');
+        const data = await res.json();
         profiles = data.profiles;
 
-        // If device has linked profile, use it. Otherwise use server's active profile
         if (linkedProfileId && profiles[linkedProfileId]) {
             currentProfileId = linkedProfileId;
-            console.log('Using device profile:', currentProfileId);
-            // Switch to device's profile
             await fetch(`/api/profiles/${linkedProfileId}/switch`, { method: 'POST' });
         } else {
             currentProfileId = data.active_profile;
-            console.log('Using server active profile:', currentProfileId);
         }
-
-        return data;
-    } catch (error) {
-        showStatus('Error loading profiles: ' + error.message, 'error');
-        console.error('Error loading profiles:', error);
+    } catch (err) {
+        console.error('Error loading profiles:', err);
     }
 }
 
-// Switch profile
-async function switchProfile(profileId) {
-    try {
-        const response = await fetch(`/api/profiles/${profileId}/switch`, {
-            method: 'POST'
-        });
+function renderProfileSelector() {
+    const sel = document.getElementById('profile-selector');
+    sel.innerHTML = Object.entries(profiles).map(([id, p]) =>
+        `<option value="${id}" ${id === currentProfileId ? 'selected' : ''}>${p.name}</option>`
+    ).join('');
 
-        if (response.ok) {
-            // Reload page to show new profile's sources
-            window.location.reload();
-        } else {
-            showStatus('Failed to switch profile', 'error');
-        }
-    } catch (error) {
-        showStatus('Error switching profile: ' + error.message, 'error');
-    }
+    document.getElementById('settings-profile-name').textContent =
+        profiles[currentProfileId]?.name || '--';
+
+    // Disable delete for default
+    const delBtn = document.getElementById('delete-profile-btn');
+    if (delBtn) delBtn.disabled = currentProfileId === 'default';
 }
 
-// Create new profile
-async function createProfile(profileName) {
-    try {
-        const profileId = profileName.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+function renderSources() {
+    const list = document.getElementById('sources-list');
+    const profile = profiles[currentProfileId];
+    if (!profile) return;
 
-        const response = await fetch('/api/profiles', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                id: profileId,
-                name: profileName
-            })
-        });
+    const sources = profile.sources || {};
+    // Sort by order
+    const sorted = Object.entries(sources).sort((a, b) =>
+        (a[1].order ?? 999) - (b[1].order ?? 999)
+    );
 
-        const data = await response.json();
-
-        if (response.ok) {
-            showStatus('Profile created successfully', 'success');
-            // Switch to new profile
-            await switchProfile(profileId);
-        } else {
-            showStatus('Failed to create profile: ' + data.message, 'error');
-        }
-    } catch (error) {
-        showStatus('Error creating profile: ' + error.message, 'error');
-    }
-}
-
-// Delete current profile
-async function deleteCurrentProfile() {
-    if (currentProfileId === 'default') {
-        showStatus('Cannot delete default profile', 'error');
+    if (!sorted.length) {
+        list.innerHTML = '<p class="muted-text" style="text-align:center;padding:24px;">No sources configured</p>';
         return;
     }
 
-    if (!confirm(`Delete profile "${profiles[currentProfileId].name}"? This cannot be undone.`)) {
-        return;
-    }
+    list.innerHTML = sorted.map(([name, data]) => `
+        <div class="source-item" draggable="true" data-source="${name}">
+            <div class="drag-handle" title="Drag to reorder">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <circle cx="5" cy="3" r="1.5"/><circle cx="11" cy="3" r="1.5"/>
+                    <circle cx="5" cy="8" r="1.5"/><circle cx="11" cy="8" r="1.5"/>
+                    <circle cx="5" cy="13" r="1.5"/><circle cx="11" cy="13" r="1.5"/>
+                </svg>
+            </div>
+            <div class="source-info">
+                <div class="source-name">
+                    ${name}
+                    ${data.custom ? '<span class="custom-badge">Custom</span>' : ''}
+                </div>
+                <div class="source-description">${data.description || ''}</div>
+            </div>
+            <span class="staleness-badge" id="stale-${name.replace(/[^a-zA-Z0-9]/g, '_')}" style="display:none;"></span>
+            <label class="toggle-label">
+                <input type="checkbox" class="toggle-input source-toggle" data-source="${name}" ${data.enabled ? 'checked' : ''}>
+                <span class="toggle-slider"></span>
+            </label>
+            ${data.custom ? `<button class="btn-delete-source" data-source="${name}">×</button>` : ''}
+        </div>
+    `).join('');
 
-    try {
-        const response = await fetch(`/api/profiles/${currentProfileId}`, {
-            method: 'DELETE'
-        });
+    // Source toggle change handlers
+    list.querySelectorAll('.source-toggle').forEach(toggle => {
+        toggle.addEventListener('change', () => saveSourceToggles());
+    });
 
-        if (response.ok) {
-            showStatus('Profile deleted', 'success');
-            // Reload to switch to default profile
-            window.location.reload();
-        } else {
-            showStatus('Failed to delete profile', 'error');
-        }
-    } catch (error) {
-        showStatus('Error deleting profile: ' + error.message, 'error');
-    }
+    // Delete source handlers
+    list.querySelectorAll('.btn-delete-source').forEach(btn => {
+        btn.addEventListener('click', () => deleteCustomSource(btn.dataset.source));
+    });
+
+    setupDragAndDrop();
 }
 
-// Save current profile configuration
-async function saveConfiguration() {
-    try {
-        const sources = getCurrentSources();
+async function saveSourceToggles() {
+    const sources = { ...profiles[currentProfileId].sources };
+    document.querySelectorAll('.source-toggle').forEach(toggle => {
+        const name = toggle.dataset.source;
+        if (sources[name]) sources[name].enabled = toggle.checked;
+    });
 
-        const response = await fetch(`/api/profiles/${currentProfileId}/sources`, {
+    try {
+        await fetch(`/api/profiles/${currentProfileId}/sources`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ sources })
         });
-
-        if (response.ok) {
-            showStatus('Configuration saved successfully', 'success');
-        } else {
-            showStatus('Failed to save configuration', 'error');
-        }
-    } catch (error) {
-        showStatus('Error saving configuration: ' + error.message, 'error');
+        profiles[currentProfileId].sources = sources;
+    } catch (err) {
+        showToast('Failed to save');
     }
+}
+
+// Drag and Drop (HTML5 + touch fallback)
+function setupDragAndDrop() {
+    const list = document.getElementById('sources-list');
+    let draggedEl = null;
+
+    // HTML5 DnD for desktop
+    list.querySelectorAll('.source-item').forEach(item => {
+        item.addEventListener('dragstart', e => {
+            draggedEl = item;
+            item.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', item.dataset.source);
+        });
+
+        item.addEventListener('dragend', () => {
+            item.classList.remove('dragging');
+            list.querySelectorAll('.source-item').forEach(el => el.classList.remove('drag-over'));
+            draggedEl = null;
+        });
+
+        item.addEventListener('dragover', e => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            if (draggedEl && draggedEl !== item) {
+                item.classList.add('drag-over');
+            }
+        });
+
+        item.addEventListener('dragleave', () => {
+            item.classList.remove('drag-over');
+        });
+
+        item.addEventListener('drop', e => {
+            e.preventDefault();
+            item.classList.remove('drag-over');
+            if (draggedEl && draggedEl !== item) {
+                const items = [...list.querySelectorAll('.source-item')];
+                const fromIdx = items.indexOf(draggedEl);
+                const toIdx = items.indexOf(item);
+                if (fromIdx < toIdx) {
+                    item.after(draggedEl);
+                } else {
+                    item.before(draggedEl);
+                }
+                saveSourceOrder();
+            }
+        });
+    });
+
+    // Touch fallback for iOS Safari
+    let touchDragEl = null;
+    let touchClone = null;
+    let touchStartY = 0;
+
+    list.querySelectorAll('.drag-handle').forEach(handle => {
+        handle.addEventListener('touchstart', e => {
+            touchDragEl = handle.closest('.source-item');
+            if (!touchDragEl) return;
+            touchStartY = e.touches[0].clientY;
+            touchDragEl.classList.add('dragging');
+
+            // Create visual clone
+            touchClone = touchDragEl.cloneNode(true);
+            touchClone.style.cssText = `position:fixed;z-index:9999;pointer-events:none;opacity:0.8;width:${touchDragEl.offsetWidth}px;left:${touchDragEl.getBoundingClientRect().left}px;top:${touchDragEl.getBoundingClientRect().top}px;`;
+            document.body.appendChild(touchClone);
+        }, { passive: true });
+
+        handle.addEventListener('touchmove', e => {
+            if (!touchDragEl || !touchClone) return;
+            e.preventDefault();
+            const touch = e.touches[0];
+            touchClone.style.top = `${touch.clientY - 30}px`;
+
+            // Find target element under touch point
+            touchClone.style.display = 'none';
+            const target = document.elementFromPoint(touch.clientX, touch.clientY);
+            touchClone.style.display = '';
+
+            list.querySelectorAll('.source-item').forEach(el => el.classList.remove('drag-over'));
+            const targetItem = target?.closest('.source-item');
+            if (targetItem && targetItem !== touchDragEl) {
+                targetItem.classList.add('drag-over');
+            }
+        }, { passive: false });
+
+        handle.addEventListener('touchend', () => {
+            if (!touchDragEl) return;
+
+            const overItem = list.querySelector('.source-item.drag-over');
+            if (overItem && overItem !== touchDragEl) {
+                const items = [...list.querySelectorAll('.source-item')];
+                const fromIdx = items.indexOf(touchDragEl);
+                const toIdx = items.indexOf(overItem);
+                if (fromIdx < toIdx) {
+                    overItem.after(touchDragEl);
+                } else {
+                    overItem.before(touchDragEl);
+                }
+                saveSourceOrder();
+            }
+
+            touchDragEl.classList.remove('dragging');
+            list.querySelectorAll('.source-item').forEach(el => el.classList.remove('drag-over'));
+            if (touchClone) { touchClone.remove(); touchClone = null; }
+            touchDragEl = null;
+        });
+    });
+}
+
+async function saveSourceOrder() {
+    const items = document.querySelectorAll('#sources-list .source-item');
+    const order = [...items].map(el => el.dataset.source);
+
+    try {
+        await fetch(`/api/profiles/${currentProfileId}/sources/reorder`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ order })
+        });
+
+        // Update local state
+        order.forEach((name, idx) => {
+            if (profiles[currentProfileId]?.sources?.[name]) {
+                profiles[currentProfileId].sources[name].order = idx;
+            }
+        });
+    } catch {}
+}
+
+// Staleness checking
+async function checkStaleness() {
+    if (!currentProfileId) return;
+    try {
+        const res = await fetch(`/api/profiles/${currentProfileId}/staleness`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        Object.entries(data.staleness || {}).forEach(([name, info]) => {
+            const id = 'stale-' + name.replace(/[^a-zA-Z0-9]/g, '_');
+            const badge = document.getElementById(id);
+            if (!badge) return;
+
+            badge.style.display = 'inline-block';
+            if (info.stale) {
+                badge.className = 'staleness-badge stale';
+                badge.textContent = info.age_hours ? `Stale (${Math.round(info.age_hours)}h ago)` : 'Stale';
+            } else {
+                badge.className = 'staleness-badge fresh';
+                badge.textContent = info.age_hours ? `${Math.round(info.age_hours)}h ago` : 'OK';
+            }
+        });
+    } catch {}
+}
+
+// Profile selector change
+document.getElementById('profile-selector').addEventListener('change', async e => {
+    const newId = e.target.value;
+    if (newId === currentProfileId) return;
+    try {
+        await fetch(`/api/profiles/${newId}/switch`, { method: 'POST' });
+        await fetch(`/api/device/${deviceId}/profile`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ profile_id: newId })
+        });
+        currentProfileId = newId;
+        renderProfileSelector();
+        renderSources();
+        showToast(`Switched to ${profiles[newId].name}`);
+    } catch {
+        showToast('Failed to switch profile');
+    }
+});
+
+// Generate bulletin via SSE
+document.getElementById('generate-btn').addEventListener('click', () => {
+    const btn = document.getElementById('generate-btn');
+    btn.disabled = true;
+    btn.querySelector('.btn-text').style.display = 'none';
+    btn.querySelector('.btn-spinner').style.display = 'inline-flex';
+
+    const progressContainer = document.getElementById('generation-progress');
+    const log = document.getElementById('progress-log');
+    progressContainer.style.display = 'block';
+    log.innerHTML = '';
+
+    const es = new EventSource('/api/generate/stream');
+
+    es.onmessage = event => {
+        try {
+            const data = JSON.parse(event.data);
+            let icon = '', cls = '';
+            switch (data.stage) {
+                case 'downloading': icon = '📥'; cls = 'progress-downloading'; break;
+                case 'processing': icon = '⚙️'; cls = 'progress-processing'; break;
+                case 'complete': icon = '✅'; cls = 'progress-complete'; break;
+                case 'warning': icon = '⚠️'; cls = 'progress-warning'; break;
+                case 'error': icon = '❌'; cls = 'progress-error'; break;
+            }
+
+            const entry = document.createElement('div');
+            entry.className = `progress-entry ${cls}`;
+            entry.innerHTML = `<span class="progress-icon">${icon}</span><span>${data.message}</span>`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+
+            if (data.stage === 'complete') {
+                es.close();
+                resetGenerateBtn(btn);
+                showToast('Bulletin generated!');
+                loadLatestBulletin();
+            }
+
+            if (data.stage === 'error') {
+                es.close();
+                resetGenerateBtn(btn);
+            }
+        } catch {}
+    };
+
+    es.onerror = () => {
+        es.close();
+        resetGenerateBtn(btn);
+        showToast('Connection lost during generation');
+    };
+});
+
+function resetGenerateBtn(btn) {
+    btn.disabled = false;
+    btn.querySelector('.btn-text').style.display = 'inline';
+    btn.querySelector('.btn-spinner').style.display = 'none';
 }
 
 // Add custom source
-async function addCustomSource(name, url, description) {
-    try {
-        const response = await fetch(`/api/profiles/${currentProfileId}/custom-source`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ name, url, description })
-        });
-
-        if (response.ok) {
-            showStatus('Custom source added successfully', 'success');
-            // Reload to show new source
-            window.location.reload();
-        } else {
-            const data = await response.json();
-            showStatus('Failed to add source: ' + data.message, 'error');
-        }
-    } catch (error) {
-        showStatus('Error adding source: ' + error.message, 'error');
-    }
-}
-
-// Delete custom source
-async function deleteCustomSource(sourceName) {
-    if (!confirm(`Delete "${sourceName}"?`)) {
-        return;
-    }
-
-    try {
-        const response = await fetch(`/api/profiles/${currentProfileId}/custom-source`, {
-            method: 'DELETE',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ name: sourceName })
-        });
-
-        if (response.ok) {
-            showStatus('Source deleted', 'success');
-            // Reload to update UI
-            window.location.reload();
-        } else {
-            showStatus('Failed to delete source', 'error');
-        }
-    } catch (error) {
-        showStatus('Error deleting source: ' + error.message, 'error');
-    }
-}
-
-// Generate bulletin with real-time progress
-function generateBulletin() {
-    // Disable button and show spinner
-    generateBtn.disabled = true;
-    generateBtn.querySelector('.btn-text').style.display = 'none';
-    generateBtn.querySelector('.btn-spinner').style.display = 'inline-flex';
-
-    // Show progress
-    generationProgress.style.display = 'block';
-    generationProgress.innerHTML = '<div class="progress-log"></div>';
-    const progressLog = generationProgress.querySelector('.progress-log');
-
-    // Create Server-Sent Events connection
-    const eventSource = new EventSource('/api/generate/stream');
-
-    eventSource.onmessage = (event) => {
-        try {
-            const progress = JSON.parse(event.data);
-
-            // Create progress message
-            let icon = '';
-            let className = '';
-
-            switch (progress.stage) {
-                case 'downloading':
-                    icon = '📥';
-                    className = 'progress-downloading';
-                    break;
-                case 'processing':
-                    icon = '⚙️';
-                    className = 'progress-processing';
-                    break;
-                case 'complete':
-                    icon = '✅';
-                    className = 'progress-complete';
-                    break;
-                case 'warning':
-                    icon = '⚠️';
-                    className = 'progress-warning';
-                    break;
-                case 'error':
-                    icon = '❌';
-                    className = 'progress-error';
-                    break;
-            }
-
-            // Add progress message
-            const logEntry = document.createElement('div');
-            logEntry.className = `progress-entry ${className}`;
-            logEntry.innerHTML = `<span class="progress-icon">${icon}</span><span class="progress-text">${progress.message}</span>`;
-            progressLog.appendChild(logEntry);
-
-            // Auto-scroll to bottom
-            progressLog.scrollTop = progressLog.scrollHeight;
-
-            // Handle completion
-            if (progress.stage === 'complete') {
-                eventSource.close();
-                showStatus('Bulletin generated successfully!', 'success');
-                loadRecentFiles();
-                loadBulletinSelector(); // Refresh player dropdown
-
-                // Re-enable button after delay
-                setTimeout(() => {
-                    generateBtn.disabled = false;
-                    generateBtn.querySelector('.btn-text').style.display = 'inline';
-                    generateBtn.querySelector('.btn-spinner').style.display = 'none';
-                }, 1000);
-            }
-
-            // Handle errors
-            if (progress.stage === 'error') {
-                eventSource.close();
-                showStatus('Generation failed: ' + progress.message, 'error');
-
-                // Re-enable button
-                generateBtn.disabled = false;
-                generateBtn.querySelector('.btn-text').style.display = 'inline';
-                generateBtn.querySelector('.btn-spinner').style.display = 'none';
-            }
-
-        } catch (e) {
-            console.error('Error parsing progress:', e);
-        }
-    };
-
-    eventSource.onerror = () => {
-        eventSource.close();
-        showStatus('Connection lost during generation', 'error');
-
-        // Re-enable button
-        generateBtn.disabled = false;
-        generateBtn.querySelector('.btn-text').style.display = 'inline';
-        generateBtn.querySelector('.btn-spinner').style.display = 'none';
-    };
-}
-
-// Load recent files
-async function loadRecentFiles() {
-    try {
-        const response = await fetch('/api/recent-files');
-        const data = await response.json();
-
-        if (response.ok && data.files && data.files.length > 0) {
-            recentFilesList.innerHTML = data.files.map(file => `
-                <div class="file-item" data-filename="${file.filename}">
-                    <div class="file-info">
-                        <div class="file-name">${file.filename}</div>
-                        <div class="file-meta">
-                            ${formatFileSize(file.size)} • ${formatDate(file.modified)}
-                        </div>
-                    </div>
-                    <div class="file-actions">
-                        <button class="btn btn-secondary btn-view-details" data-filename="${file.filename}">
-                            Details
-                        </button>
-                        <button class="btn btn-secondary btn-email" data-filename="${file.filename}">
-                            Email
-                        </button>
-                        <a href="/api/download/${file.filename}" class="btn btn-download" download>
-                            Download
-                        </a>
-                    </div>
-                    <div class="bulletin-metadata" id="metadata-${file.filename}" style="display: none;">
-                        <div class="metadata-loading">Loading details...</div>
-                    </div>
-                </div>
-            `).join('');
-        } else {
-            recentFilesList.innerHTML = `
-                <div class="empty-state">
-                    <div class="empty-state-icon">📻</div>
-                    <div class="empty-state-title">No bulletins yet</div>
-                    <div class="empty-state-text">Click "Generate Bulletin" above to create your first news digest</div>
-                </div>
-            `;
-        }
-    } catch (error) {
-        recentFilesList.innerHTML = `
-            <div class="empty-state">
-                <div class="empty-state-icon">⚠️</div>
-                <div class="empty-state-title">Error loading files</div>
-                <div class="empty-state-text">Please refresh the page to try again</div>
-            </div>
-        `;
-    }
-}
-
-// Load and display bulletin metadata
-async function toggleBulletinDetails(filename) {
-    const metadataDiv = document.getElementById(`metadata-${filename}`);
-
-    if (!metadataDiv) return;
-
-    // Toggle visibility
-    if (metadataDiv.style.display === 'none') {
-        metadataDiv.style.display = 'block';
-
-        // Load metadata if not already loaded
-        if (metadataDiv.querySelector('.metadata-loading')) {
-            try {
-                const response = await fetch(`/api/bulletin/${filename}/metadata`);
-                const data = await response.json();
-
-                if (response.ok && data.metadata) {
-                    const meta = data.metadata;
-                    const totalMinutes = Math.floor(meta.total_duration / 60);
-                    const totalSeconds = Math.floor(meta.total_duration % 60);
-
-                    let sourcesHTML = '';
-                    if (meta.source_details && meta.source_details.length > 0) {
-                        sourcesHTML = `
-                            <div class="metadata-section">
-                                <h4>Sources (${meta.sources_succeeded.length} of ${meta.sources_attempted.length})</h4>
-                                <ul class="metadata-sources">
-                                    ${meta.source_details.map(source => {
-                                        const mins = Math.floor(source.duration / 60);
-                                        const secs = Math.floor(source.duration % 60);
-                                        return `<li><strong>${source.name}</strong> - ${mins}:${secs.toString().padStart(2, '0')}</li>`;
-                                    }).join('')}
-                                </ul>
-                            </div>
-                        `;
-                    }
-
-                    let failuresHTML = '';
-                    if (meta.sources_failed && meta.sources_failed.length > 0) {
-                        failuresHTML = `
-                            <div class="metadata-section metadata-failures">
-                                <h4>⚠️ Unavailable Sources</h4>
-                                <ul class="metadata-sources">
-                                    ${meta.sources_failed.map(failure => {
-                                        const reason = failure.reason ? ` - ${failure.reason.substring(0, 50)}` : '';
-                                        return `<li>${failure.name}${reason}</li>`;
-                                    }).join('')}
-                                </ul>
-                            </div>
-                        `;
-                    }
-
-                    metadataDiv.innerHTML = `
-                        <div class="metadata-content">
-                            ${sourcesHTML}
-                            ${failuresHTML}
-                            <div class="metadata-total">
-                                <strong>Total Duration:</strong> ${totalMinutes}:${totalSeconds.toString().padStart(2, '0')}
-                            </div>
-                        </div>
-                    `;
-                } else {
-                    metadataDiv.innerHTML = `
-                        <div class="metadata-content">
-                            <p>No metadata available for this bulletin.</p>
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                metadataDiv.innerHTML = `
-                    <div class="metadata-content">
-                        <p>Error loading metadata: ${error.message}</p>
-                    </div>
-                `;
-            }
-        }
-    } else {
-        metadataDiv.style.display = 'none';
-    }
-}
-
-// Email bulletin - show modal to get recipient email
-let currentEmailFilename = null;
-
-function emailBulletin(filename) {
-    currentEmailFilename = filename;
-    recipientEmailInput.value = ''; // Clear previous input
-    emailModal.style.display = 'flex';
-    recipientEmailInput.focus();
-}
-
-// Actually send the email with provided recipient address
-async function sendEmailToRecipient() {
-    const email = recipientEmailInput.value.trim();
-
-    // Input validation: Check email format
-    if (!email || !email.includes('@')) {
-        showStatus('Please enter a valid email address', 'error');
-        return;
-    }
-
-    if (!currentEmailFilename) {
-        showStatus('No file selected', 'error');
-        return;
-    }
-
-    // Close modal and show sending status
-    emailModal.style.display = 'none';
-    showStatus('Sending email...', 'info');
-
-    try {
-        const response = await fetch(`/api/email/${currentEmailFilename}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ email: email })
-        });
-
-        const data = await response.json();
-
-        if (response.ok) {
-            showStatus(data.message, 'success');
-        } else {
-            showStatus(data.message || 'Failed to send email', 'error');
-        }
-    } catch (error) {
-        showStatus('Error sending email: ' + error.message, 'error');
-    } finally {
-        currentEmailFilename = null;
-    }
-}
-
-// Load storage information
-async function loadStorageInfo() {
-    try {
-        const response = await fetch('/api/storage-info');
-        const data = await response.json();
-
-        if (response.ok) {
-            document.getElementById('stat-file-count').textContent = data.file_count || 0;
-            document.getElementById('stat-total-size').textContent = formatFileSize(data.total_size || 0);
-
-            if (data.oldest_file) {
-                const oldestDate = new Date(data.oldest_file);
-                const daysOld = Math.floor((Date.now() - oldestDate) / (1000 * 60 * 60 * 24));
-                document.getElementById('stat-oldest-file').textContent = `${daysOld} days ago`;
-            } else {
-                document.getElementById('stat-oldest-file').textContent = 'N/A';
-            }
-        }
-    } catch (error) {
-        showStatus('Error loading storage info: ' + error.message, 'error');
-    }
-}
-
-// Cleanup old files
-async function cleanupOldFiles() {
-    if (!confirm('Delete all bulletins except the 10 most recent? This cannot be undone.')) {
-        return;
-    }
-
-    showStatus('Cleaning up old files...', 'info');
-
-    try {
-        const response = await fetch('/api/cleanup', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ keep_count: 10 })
-        });
-
-        const data = await response.json();
-
-        if (response.ok) {
-            showStatus(`Deleted ${data.deleted_count} files, freed ${formatFileSize(data.freed_space)}`, 'success');
-            loadStorageInfo();
-            loadRecentFiles();
-        } else {
-            showStatus(data.message || 'Cleanup failed', 'error');
-        }
-    } catch (error) {
-        showStatus('Error during cleanup: ' + error.message, 'error');
-    }
-}
-
-// Event Listeners
-profileSelector.addEventListener('change', (e) => {
-    switchProfile(e.target.value);
-});
-
-newProfileBtn.addEventListener('click', () => {
-    newProfileModal.style.display = 'flex';
-    document.getElementById('new-profile-name').value = '';
-});
-
-deleteProfileBtn.addEventListener('click', deleteCurrentProfile);
-
-saveConfigBtn.addEventListener('click', saveConfiguration);
-
-generateBtn.addEventListener('click', generateBulletin);
-
-addCustomSourceBtn.addEventListener('click', () => {
-    customSourceModal.style.display = 'flex';
+document.getElementById('add-custom-source-btn').addEventListener('click', () => {
+    document.getElementById('custom-source-modal').style.display = 'flex';
     document.getElementById('custom-source-name').value = '';
     document.getElementById('custom-source-url').value = '';
     document.getElementById('custom-source-description').value = '';
 });
 
-cancelCustomSourceBtn.addEventListener('click', () => {
-    customSourceModal.style.display = 'none';
-});
-
-saveCustomSourceBtn.addEventListener('click', () => {
+document.getElementById('save-custom-source-btn').addEventListener('click', async () => {
     const name = document.getElementById('custom-source-name').value.trim();
     const url = document.getElementById('custom-source-url').value.trim();
-    const description = document.getElementById('custom-source-description').value.trim();
+    const desc = document.getElementById('custom-source-description').value.trim();
 
-    if (!name || !url) {
-        showStatus('Please enter both name and URL', 'error');
-        return;
+    if (!name || !url) { showToast('Name and URL required'); return; }
+
+    document.getElementById('custom-source-modal').style.display = 'none';
+
+    try {
+        const res = await fetch(`/api/profiles/${currentProfileId}/custom-source`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, url, description: desc })
+        });
+        if (res.ok) {
+            // Reload profiles and re-render
+            const data = await fetch('/api/profiles').then(r => r.json());
+            profiles = data.profiles;
+            renderSources();
+            showToast('Source added');
+        }
+    } catch {
+        showToast('Failed to add source');
     }
-
-    customSourceModal.style.display = 'none';
-    addCustomSource(name, url, description);
 });
 
-cancelNewProfileBtn.addEventListener('click', () => {
-    newProfileModal.style.display = 'none';
+async function deleteCustomSource(name) {
+    if (!confirm(`Delete "${name}"?`)) return;
+    try {
+        const res = await fetch(`/api/profiles/${currentProfileId}/custom-source`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+        if (res.ok) {
+            delete profiles[currentProfileId].sources[name];
+            renderSources();
+            showToast('Source deleted');
+        }
+    } catch {
+        showToast('Failed to delete source');
+    }
+}
+
+// ==================== 4. SETTINGS ====================
+// Profile management
+document.getElementById('new-profile-btn').addEventListener('click', () => {
+    document.getElementById('new-profile-modal').style.display = 'flex';
+    document.getElementById('new-profile-name').value = '';
 });
 
-cancelEmailBtn.addEventListener('click', () => {
-    emailModal.style.display = 'none';
+document.getElementById('save-new-profile-btn').addEventListener('click', async () => {
+    const name = document.getElementById('new-profile-name').value.trim();
+    if (!name) { showToast('Enter a profile name'); return; }
+
+    document.getElementById('new-profile-modal').style.display = 'none';
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+
+    try {
+        const res = await fetch('/api/profiles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, name })
+        });
+        if (res.ok) {
+            await fetch(`/api/profiles/${id}/switch`, { method: 'POST' });
+            await fetch(`/api/device/${deviceId}/profile`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ profile_id: id })
+            });
+
+            const data = await fetch('/api/profiles').then(r => r.json());
+            profiles = data.profiles;
+            currentProfileId = id;
+            renderProfileSelector();
+            renderSources();
+            showToast(`Profile "${name}" created`);
+        }
+    } catch {
+        showToast('Failed to create profile');
+    }
+});
+
+document.getElementById('delete-profile-btn').addEventListener('click', async () => {
+    if (currentProfileId === 'default') return;
+    const name = profiles[currentProfileId]?.name || currentProfileId;
+    if (!confirm(`Delete profile "${name}"?`)) return;
+
+    try {
+        const res = await fetch(`/api/profiles/${currentProfileId}`, { method: 'DELETE' });
+        if (res.ok) {
+            const data = await fetch('/api/profiles').then(r => r.json());
+            profiles = data.profiles;
+            currentProfileId = data.active_profile;
+            renderProfileSelector();
+            renderSources();
+            showToast('Profile deleted');
+        }
+    } catch {
+        showToast('Failed to delete profile');
+    }
+});
+
+// Schedule management
+async function loadSchedule() {
+    if (!currentProfileId) return;
+    try {
+        const res = await fetch(`/api/profiles/${currentProfileId}/schedule`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const sched = data.schedule || {};
+
+        document.getElementById('schedule-time').value = sched.time || '06:00';
+        document.getElementById('schedule-timezone').value = sched.timezone || 'Australia/Sydney';
+        document.getElementById('schedule-enabled').checked = sched.enabled || false;
+
+        // Load next run info
+        const schedRes = await fetch('/api/schedules');
+        if (schedRes.ok) {
+            const schedData = await schedRes.json();
+            const job = (schedData.schedules || []).find(s => s.profile_id === currentProfileId);
+            const nextRunEl = document.getElementById('schedule-next-run');
+            if (job?.next_run) {
+                const nextDate = new Date(job.next_run);
+                nextRunEl.textContent = `Next bulletin: ${nextDate.toLocaleString('en-AU', {
+                    weekday: 'short', hour: '2-digit', minute: '2-digit', timeZoneName: 'short'
+                })}`;
+            } else {
+                nextRunEl.textContent = sched.enabled ? 'Scheduled (pending)' : '';
+            }
+        }
+    } catch {}
+}
+
+async function saveSchedule() {
+    const enabled = document.getElementById('schedule-enabled').checked;
+    const time = document.getElementById('schedule-time').value;
+    const timezone = document.getElementById('schedule-timezone').value;
+
+    try {
+        await fetch(`/api/profiles/${currentProfileId}/schedule`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled, time, timezone })
+        });
+        showToast(enabled ? `Scheduled for ${time}` : 'Schedule disabled');
+        loadSchedule();
+    } catch {
+        showToast('Failed to save schedule');
+    }
+}
+
+document.getElementById('schedule-enabled').addEventListener('change', saveSchedule);
+document.getElementById('schedule-time').addEventListener('change', saveSchedule);
+document.getElementById('schedule-timezone').addEventListener('change', saveSchedule);
+
+// Recent files
+async function loadRecentFiles() {
+    const list = document.getElementById('recent-files-list');
+    try {
+        const res = await fetch('/api/recent-files');
+        const data = await res.json();
+
+        if (data.files?.length) {
+            list.innerHTML = data.files.map(f => `
+                <div class="recent-item">
+                    <div class="recent-item-info">
+                        <div class="recent-item-name">${f.filename.replace('.mp3', '')}</div>
+                        <div class="recent-item-meta">${formatFileSize(f.size)} · ${formatDate(f.modified)}</div>
+                    </div>
+                    <div class="recent-item-actions">
+                        <button class="btn-icon-small btn-email-recent" data-filename="${f.filename}" title="Email">
+                            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                        </button>
+                        <a href="/api/download/${f.filename}" class="btn-icon-small" title="Download" download>
+                            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                        </a>
+                    </div>
+                </div>
+            `).join('');
+
+            list.querySelectorAll('.btn-email-recent').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    currentEmailFilename = btn.dataset.filename;
+                    document.getElementById('recipient-email').value = '';
+                    document.getElementById('email-modal').style.display = 'flex';
+                });
+            });
+        } else {
+            list.innerHTML = '<p class="muted-text">No bulletins yet</p>';
+        }
+    } catch {
+        list.innerHTML = '<p class="muted-text">Error loading files</p>';
+    }
+}
+
+// Storage
+async function loadStorageInfo() {
+    try {
+        const res = await fetch('/api/storage-info');
+        const data = await res.json();
+        document.getElementById('stat-file-count').textContent = data.file_count || 0;
+        document.getElementById('stat-total-size').textContent = formatFileSize(data.total_size || 0);
+    } catch {}
+}
+
+document.getElementById('cleanup-btn').addEventListener('click', async () => {
+    if (!confirm('Delete all bulletins except the 10 most recent?')) return;
+    try {
+        const res = await fetch('/api/cleanup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keep_count: 10 })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(`Deleted ${data.deleted} files`);
+            loadStorageInfo();
+            loadRecentFiles();
+        }
+    } catch {
+        showToast('Cleanup failed');
+    }
+});
+
+// Email modal
+document.getElementById('send-email-btn').addEventListener('click', async () => {
+    const email = document.getElementById('recipient-email').value.trim();
+    if (!email || !email.includes('@')) { showToast('Enter a valid email'); return; }
+    if (!currentEmailFilename) return;
+
+    document.getElementById('email-modal').style.display = 'none';
+    showToast('Sending...');
+
+    try {
+        const res = await fetch(`/api/email/${currentEmailFilename}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+        });
+        const data = await res.json();
+        showToast(res.ok ? data.message : (data.message || 'Send failed'));
+    } catch {
+        showToast('Error sending email');
+    }
     currentEmailFilename = null;
 });
 
-sendEmailBtn.addEventListener('click', sendEmailToRecipient);
-
-// Allow Enter key to send email in modal
-recipientEmailInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        sendEmailToRecipient();
-    }
+document.getElementById('recipient-email').addEventListener('keypress', e => {
+    if (e.key === 'Enter') document.getElementById('send-email-btn').click();
 });
 
-// Storage management buttons
-document.getElementById('refresh-storage-btn').addEventListener('click', loadStorageInfo);
-document.getElementById('cleanup-old-files-btn').addEventListener('click', cleanupOldFiles);
-
-saveNewProfileBtn.addEventListener('click', () => {
-    const profileName = document.getElementById('new-profile-name').value.trim();
-
-    if (!profileName) {
-        showStatus('Please enter a profile name', 'error');
-        return;
-    }
-
-    newProfileModal.style.display = 'none';
-    createProfile(profileName);
+// Modal close on outside click and cancel buttons
+window.addEventListener('click', e => {
+    if (e.target.classList.contains('modal')) e.target.style.display = 'none';
 });
 
-// Delete source buttons, email buttons, and details buttons (delegated event handling)
-document.addEventListener('click', (e) => {
-    if (e.target.classList.contains('btn-delete-source')) {
-        const sourceName = e.target.dataset.source;
-        deleteCustomSource(sourceName);
-    }
-
-    if (e.target.classList.contains('btn-email')) {
-        const filename = e.target.dataset.filename;
-        emailBulletin(filename);
-    }
-
-    if (e.target.classList.contains('btn-view-details')) {
-        const filename = e.target.dataset.filename;
-        toggleBulletinDetails(filename);
-    }
+document.querySelectorAll('.modal-cancel').forEach(btn => {
+    btn.addEventListener('click', () => {
+        btn.closest('.modal').style.display = 'none';
+    });
 });
 
-// Close modals on outside click
-window.addEventListener('click', (e) => {
-    if (e.target.classList.contains('modal')) {
-        e.target.style.display = 'none';
-    }
-});
-
-// Onboarding flow for new users
-let onboardingData = {
-    profileName: '',
-    sources: {}
-};
-
-async function showOnboarding() {
-    // Check if this device has a linked profile
-    const linkedProfile = await getDeviceProfile();
-    console.log('Onboarding check - Device has linked profile:', linkedProfile);
-
-    // Only show onboarding if device has no linked profile
-    if (!linkedProfile) {
-        console.log('Showing onboarding modal');
-        const onboardingModal = document.getElementById('onboarding-modal');
-        if (onboardingModal) {
-            onboardingModal.style.display = 'flex';
-            showOnboardingStep(1);
-        }
-    } else {
-        console.log('Skipping onboarding - device already linked');
-    }
-}
-
-function showOnboardingStep(step) {
-    // Hide all steps
-    for (let i = 1; i <= 3; i++) {
-        const stepDiv = document.getElementById(`onboarding-step-${i}`);
-        if (stepDiv) stepDiv.style.display = 'none';
-    }
-
-    // Show current step
-    const currentStep = document.getElementById(`onboarding-step-${step}`);
-    if (currentStep) {
-        currentStep.style.display = 'block';
-
-        // If step 3, populate sources
-        if (step === 3) {
-            populateOnboardingSources();
-        }
-    }
-}
-
-function populateOnboardingSources() {
-    const sourcesList = document.getElementById('onboarding-sources-list');
-    if (!sourcesList) return;
-
-    // Get default sources from current profile
-    const defaultProfile = profiles['default'] || { sources: {} };
-    const sources = defaultProfile.sources;
-
-    sourcesList.innerHTML = Object.keys(sources).map(name => {
-        const data = sources[name];
-        return `
-            <label class="source-item">
-                <input
-                    type="checkbox"
-                    name="onboarding-source"
-                    value="${name}"
-                    checked
-                    data-url="${data.url}"
-                    data-description="${data.description}"
-                >
-                <div class="source-info">
-                    <span class="source-name">${name}</span>
-                    <span class="source-description">${data.description}</span>
-                </div>
-            </label>
-        `;
-    }).join('');
-}
-
-async function completeOnboarding() {
-    const profileName = document.getElementById('onboarding-profile-name').value.trim();
-
-    if (!profileName) {
-        showStatus('Please enter a profile name', 'error');
-        return;
-    }
-
-    // Collect selected sources
-    const sourceCheckboxes = document.querySelectorAll('input[name="onboarding-source"]');
-    const selectedSources = {};
-
-    sourceCheckboxes.forEach(checkbox => {
-        const name = checkbox.value;
-        selectedSources[name] = {
-            enabled: checkbox.checked,
-            url: checkbox.dataset.url,
-            description: checkbox.dataset.description,
-            custom: false
-        };
-    });
-
-    // Create profile
-    const profileId = profileName.toLowerCase().replace(/[^a-z0-9]+/g, '_');
-    console.log('Creating profile:', profileId, 'for device:', deviceId);
-
-    try {
-        const response = await fetch('/api/profiles', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: profileId, name: profileName })
-        });
-
-        let profileExists = false;
-
-        if (response.ok) {
-            console.log('Profile created successfully');
-        } else if (response.status === 400) {
-            const errorData = await response.json();
-            if (errorData.message && errorData.message.includes('already exists')) {
-                console.log('Profile already exists, using existing profile');
-                profileExists = true;
-            } else {
-                console.error('Profile creation failed:', errorData);
-                showStatus('Error: ' + errorData.message, 'error');
-                return;
-            }
-        } else {
-            const errorData = await response.json();
-            console.error('Profile creation failed:', errorData);
-            showStatus('Error creating profile: ' + errorData.message, 'error');
-            return;
-        }
-
-        // Save sources for the profile (new or existing)
-        await fetch(`/api/profiles/${profileId}/sources`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sources: selectedSources })
-        });
-
-        // Switch to this profile
-        await fetch(`/api/profiles/${profileId}/switch`, { method: 'POST' });
-
-        // Link this device to the profile
-        console.log('Linking device to profile...');
-        await linkDeviceToProfile(profileId);
-        console.log('Device linked successfully');
-
-        // Close modal
-        document.getElementById('onboarding-modal').style.display = 'none';
-
-        // Reload to show new profile
-        window.location.reload();
-
-    } catch (error) {
-        console.error('Error in completeOnboarding:', error);
-        showStatus('Error creating profile: ' + error.message, 'error');
-    }
-}
-
-// Onboarding navigation
-document.getElementById('onboarding-next-1')?.addEventListener('click', () => showOnboardingStep(2));
-document.getElementById('onboarding-back-2')?.addEventListener('click', () => showOnboardingStep(1));
-document.getElementById('onboarding-next-2')?.addEventListener('click', () => {
-    const profileName = document.getElementById('onboarding-profile-name').value.trim();
-    if (!profileName) {
-        showStatus('Please enter a profile name', 'error');
-        return;
-    }
-    showOnboardingStep(3);
-});
-document.getElementById('onboarding-back-3')?.addEventListener('click', () => showOnboardingStep(2));
-document.getElementById('onboarding-finish')?.addEventListener('click', completeOnboarding);
-
-// Player functionality
-const audio = document.getElementById('audio');
-const playBtn = document.getElementById('play-btn');
-const playIcon = document.getElementById('play-icon');
-const pauseIcon = document.getElementById('pause-icon');
-const currentTimeEl = document.getElementById('current-time');
-const durationEl = document.getElementById('duration');
-const speedBtn = document.getElementById('speed-btn');
-const speedText = document.getElementById('speed-text');
-const bulletinSelector = document.getElementById('bulletin-selector');
-const audioPlayer = document.getElementById('audio-player');
-const noBulletinMessage = document.getElementById('no-bulletin-message');
-
-let currentBulletin = null;
-
-// Load available bulletins into dropdown
-async function loadBulletinSelector() {
-    try {
-        const response = await fetch('/api/recent-files');
-        const data = await response.json();
-
-        if (response.ok && data.files && data.files.length > 0) {
-            // Filter bulletins for current profile only
-            const profileBulletins = data.files.filter(file =>
-                file.filename.startsWith(currentProfileId + '_')
-            );
-
-            if (profileBulletins.length > 0) {
-                bulletinSelector.innerHTML = profileBulletins.map((file, index) => `
-                    <option value="${file.filename}" ${index === 0 ? 'selected' : ''}>
-                        ${file.filename.replace('.mp3', '').replace(currentProfileId + '_', '')}
-                    </option>
-                `).join('');
-
-                // Auto-load first bulletin
-                loadBulletin(profileBulletins[0].filename);
-            } else {
-                bulletinSelector.innerHTML = '<option value="">No bulletins available</option>';
-                audioPlayer.style.display = 'none';
-                noBulletinMessage.style.display = 'block';
-            }
-        } else {
-            bulletinSelector.innerHTML = '<option value="">No bulletins available</option>';
-            audioPlayer.style.display = 'none';
-            noBulletinMessage.style.display = 'block';
-        }
-    } catch (error) {
-        showStatus('Error loading bulletins: ' + error.message, 'error');
-    }
-}
-
-// Load selected bulletin
-function loadBulletin(filename) {
-    if (!filename) return;
-
-    currentBulletin = filename;
-    audio.src = `/api/download/${filename}`;
-    document.getElementById('bulletin-filename').textContent = filename.replace('.mp3', '');
-    audioPlayer.style.display = 'block';
-    noBulletinMessage.style.display = 'none';
-}
-
-// Format time in MM:SS
-function formatPlayerTime(seconds) {
-    if (isNaN(seconds)) return '0:00';
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-}
-
-// Play/Pause toggle
-if (playBtn) {
-    playBtn.addEventListener('click', () => {
-        if (audio.paused) {
-            audio.play();
-        } else {
-            audio.pause();
-        }
-    });
-}
-
-// Update play/pause icon
-if (audio) {
-    audio.addEventListener('play', () => {
-        playIcon.style.display = 'none';
-        pauseIcon.style.display = 'block';
-    });
-
-    audio.addEventListener('pause', () => {
-        playIcon.style.display = 'block';
-        pauseIcon.style.display = 'none';
-    });
-
-    // Update time display
-    audio.addEventListener('timeupdate', () => {
-        if (currentTimeEl) currentTimeEl.textContent = formatPlayerTime(audio.currentTime);
-    });
-
-    audio.addEventListener('loadedmetadata', () => {
-        if (durationEl) durationEl.textContent = formatPlayerTime(audio.duration);
-    });
-}
-
-// Speed control
-if (speedBtn) {
-    const speeds = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
-    let currentSpeedIndex = 1;
-
-    speedBtn.addEventListener('click', () => {
-        currentSpeedIndex = (currentSpeedIndex + 1) % speeds.length;
-        const newSpeed = speeds[currentSpeedIndex];
-        audio.playbackRate = newSpeed;
-        speedText.textContent = `${newSpeed}x`;
-    });
-}
-
-// Bulletin selector change
-if (bulletinSelector) {
-    bulletinSelector.addEventListener('change', (e) => {
-        loadBulletin(e.target.value);
-    });
-}
-
-// Initialize on page load
+// ==================== 5. INIT ====================
 document.addEventListener('DOMContentLoaded', async () => {
-    // Initialize device ID first
     deviceId = getDeviceId();
-    console.log('Device ID:', deviceId);
-
-    // Load profiles
     await loadProfiles();
-
-    // Load other data
-    loadRecentFiles();
-    loadStorageInfo();
-    loadBulletinSelector();
+    renderProfileSelector();
+    renderSources();
+    loadLatestBulletin();
 });

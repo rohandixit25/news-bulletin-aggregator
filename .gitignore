@@ -34,6 +34,9 @@ Thumbs.db
 # Authentication tokens
 token.json
 credentials.json
+gdrive_credentials.json
+gdrive_token.json
+client_secret_*.json
 
 # User-specific config (keep config.json in repo for structure reference)
 # If you want to exclude it: config.json
@@ -46,5 +49,5 @@ start-services.sh
 qbit/
 quantium-brand-guidelines/
 
-# Enhanced generator (if not used)
-enhanced_generator.py
+# Scheduler (generated at runtime)
+# scheduler.py

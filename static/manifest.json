@@ -2,7 +2,7 @@
   "name": "News Bulletin Aggregator",
   "short_name": "News Bulletin",
   "description": "Daily news bulletins from multiple sources combined into one audio file",
-  "start_url": "/player",
+  "start_url": "/",
   "display": "standalone",
   "background_color": "#000000",
   "theme_color": "#000000",
@@ -75,7 +75,7 @@
       "name": "Play Latest Bulletin",
       "short_name": "Play",
       "description": "Play the latest news bulletin",
-      "url": "/player",
+      "url": "/",
       "icons": [
         {
           "src": "/static/icons/icon-192.png",

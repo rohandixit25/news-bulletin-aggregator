@@ -6,6 +6,7 @@ News Bulletin Aggregator - Combines daily news bulletins into one audio file
 import os
 import logging
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import feedparser
 import requests
 from pydub import AudioSegment
@@ -99,6 +100,100 @@ class NewsBulletinAggregator:
             logger.error(f"Error fetching {source_name}: {str(e)}")
             return None
 
+    @staticmethod
+    def normalise_audio(segment, target_dbfs=-20.0):
+        """
+        Normalise an audio segment to target loudness level.
+
+        Args:
+            segment: pydub AudioSegment
+            target_dbfs: Target loudness in dBFS (default -20.0)
+
+        Returns:
+            Normalised AudioSegment
+        """
+        current_dbfs = segment.dBFS
+        if current_dbfs == float('-inf'):
+            return segment
+        gain_needed = target_dbfs - current_dbfs
+        return segment.apply_gain(gain_needed)
+
+    def fetch_bulletins_parallel(self, max_workers=4):
+        """
+        Fetch bulletins from all sources in parallel using ThreadPoolExecutor.
+
+        Args:
+            max_workers: Maximum concurrent downloads
+
+        Returns:
+            List of (source_name, file_path) tuples preserving source identity,
+            ordered by self.news_sources key order.
+        """
+        results = {}
+
+        def _fetch(source_name, feed_url):
+            audio_file = self.fetch_latest_bulletin(source_name, feed_url)
+            return source_name, audio_file
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(_fetch, name, url): name
+                for name, url in self.news_sources.items()
+            }
+            for future in as_completed(futures):
+                try:
+                    source_name, audio_file = future.result()
+                    if audio_file:
+                        results[source_name] = audio_file
+                except Exception as e:
+                    source_name = futures[future]
+                    logger.error(f"Parallel fetch error for {source_name}: {str(e)}")
+
+        # Preserve original source ordering
+        ordered = []
+        for name in self.news_sources:
+            if name in results:
+                ordered.append((name, results[name]))
+        return ordered
+
+    def check_feed_staleness(self, source_name, feed_url, max_age_hours=12):
+        """
+        Check if an RSS feed's latest entry is stale.
+
+        Args:
+            source_name: Name of the news source
+            feed_url: URL of the RSS feed
+            max_age_hours: Hours after which a feed is considered stale
+
+        Returns:
+            Dict with {stale: bool, age_hours: float, latest_title: str}
+        """
+        try:
+            feed = feedparser.parse(feed_url)
+            if not feed.entries:
+                return {'stale': True, 'age_hours': None, 'latest_title': None}
+
+            latest = feed.entries[0]
+            title = latest.get('title', 'Unknown')
+
+            import time
+            from calendar import timegm
+            published = latest.get('published_parsed') or latest.get('updated_parsed')
+            if published:
+                entry_timestamp = timegm(published)
+                age_hours = (time.time() - entry_timestamp) / 3600
+                return {
+                    'stale': age_hours > max_age_hours,
+                    'age_hours': round(age_hours, 1),
+                    'latest_title': title
+                }
+            else:
+                return {'stale': False, 'age_hours': None, 'latest_title': title}
+
+        except Exception as e:
+            logger.error(f"Staleness check failed for {source_name}: {str(e)}")
+            return {'stale': True, 'age_hours': None, 'latest_title': None}
+
     def combine_audio_files(self, audio_files, output_filename):
         """
         Combine multiple audio files into one
@@ -121,6 +216,7 @@ class NewsBulletinAggregator:
             try:
                 logger.info(f"Adding {audio_file.name}...")
                 audio = AudioSegment.from_file(str(audio_file))
+                audio = self.normalise_audio(audio)
                 combined += audio
 
                 # Add 2 second silence between bulletins
@@ -151,12 +247,9 @@ class NewsBulletinAggregator:
         """Main method to generate combined daily bulletin"""
         logger.info("Starting news bulletin aggregation...")
 
-        # Fetch latest bulletins from all sources
-        downloaded_files = []
-        for source_name, feed_url in self.news_sources.items():
-            audio_file = self.fetch_latest_bulletin(source_name, feed_url)
-            if audio_file:
-                downloaded_files.append(audio_file)
+        # Fetch latest bulletins from all sources in parallel
+        results = self.fetch_bulletins_parallel()
+        downloaded_files = [file_path for _, file_path in results]
 
         if not downloaded_files:
             logger.error("No audio files were downloaded successfully")

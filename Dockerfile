@@ -28,5 +28,7 @@ EXPOSE 5000
 ENV FLASK_APP=app.py
 ENV PYTHONUNBUFFERED=1
 
-# Run the application with gunicorn for production
-CMD ["python3", "app.py"]
+# Run with gunicorn for production
+# --timeout 300 allows long-running bulletin generation
+# --threads 4 supports background generation + serving
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--timeout", "300", "--threads", "4", "app:app"]

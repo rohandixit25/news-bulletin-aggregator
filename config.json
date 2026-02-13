@@ -1,4 +1,6 @@
 {
+  "gdrive_path": "/Users/rohand/Library/CloudStorage/GoogleDrive-rohanmdixit@gmail.com/My Drive/News",
+  "gdrive_folder_id": "1JrXPZfRFawvGGp7xOiXDJnfsn3zlXkQz",
   "active_profile": "rohan",
   "profiles": {
     "default": {
@@ -7,75 +9,153 @@
         "ABC News Top Stories": {
           "enabled": true,
           "url": "https://www.abc.net.au/feeds/101858056/podcast.xml",
-          "description": "Australian news headlines (60-90 seconds)"
+          "description": "Australian news headlines (60-90 seconds)",
+          "order": 0
         },
         "BBC News 5min": {
           "enabled": false,
           "url": "https://podcast.voice.api.bbci.co.uk/rss/audio/p002vsmz?api_key=Wbek5zSqxz0Hk1blo5IBqbd9SCWIfNbT",
-          "description": "World news bulletin (5 minutes)"
+          "description": "World news bulletin (5 minutes)",
+          "order": 1
         },
         "SBS News Updates": {
           "enabled": false,
           "url": "https://feeds.sbs.com.au/sbs-news-update",
-          "description": "Australian/World news (morning/midday/evening)"
+          "description": "Australian/World news (morning/midday/evening)",
+          "order": 2
         },
         "CNBC Business Update": {
           "enabled": false,
           "url": "https://feeds.simplecast.com/oloBAvaH",
-          "description": "US market updates (3-5 minutes)"
+          "description": "US market updates (3-5 minutes)",
+          "order": 3
         },
         "CommSec Market Update": {
           "enabled": false,
           "url": "https://www.omnycontent.com/d/playlist/820f09cf-2ace-4180-a92d-aa4c0008f5fb/7ce30ada-3515-4538-a131-afef0177d550/1b3da022-8454-4155-8336-afef0177d567/podcast.rss",
-          "description": "Australian market commentary"
+          "description": "Australian market commentary",
+          "order": 4
         },
         "AI News Daily": {
           "enabled": false,
           "url": "https://ai-news-daily.podigee.io/feed/mp3",
-          "description": "AI technology news (5 minutes)"
+          "description": "AI technology news (5 minutes)",
+          "order": 5
         }
+      },
+      "schedule": {
+        "enabled": false,
+        "time": "06:00",
+        "timezone": "Australia/Sydney"
       }
     },
     "rohan": {
       "name": "Rohan",
       "sources": {
         "ABC News Top Stories": {
+          "custom": false,
+          "description": "Australian news headlines (60-90 seconds)",
           "enabled": true,
+          "order": 0,
+          "url": "https://www.abc.net.au/feeds/101858056/podcast.xml"
+        },
+        "AI News Daily": {
+          "custom": false,
+          "description": "AI technology news (5 minutes)",
+          "enabled": false,
+          "order": 1,
+          "url": "https://ai-news-daily.podigee.io/feed/mp3"
+        },
+        "BBC News 5min": {
+          "custom": false,
+          "description": "World news bulletin (5 minutes)",
+          "enabled": true,
+          "order": 2,
+          "url": "https://podcast.voice.api.bbci.co.uk/rss/audio/p002vsmz?api_key=Wbek5zSqxz0Hk1blo5IBqbd9SCWIfNbT"
+        },
+        "CNBC Business Update": {
+          "custom": false,
+          "description": "US market updates (3-5 minutes)",
+          "enabled": true,
+          "order": 3,
+          "url": "https://feeds.simplecast.com/oloBAvaH"
+        },
+        "CommSec Market Update": {
+          "custom": false,
+          "description": "Australian market commentary",
+          "enabled": true,
+          "order": 4,
+          "url": "https://www.omnycontent.com/d/playlist/820f09cf-2ace-4180-a92d-aa4c0008f5fb/7ce30ada-3515-4538-a131-afef0177d550/1b3da022-8454-4155-8336-afef0177d567/podcast.rss"
+        },
+        "SBS News Updates": {
+          "custom": false,
+          "description": "Australian/World news (morning/midday/evening)",
+          "enabled": true,
+          "order": 5,
+          "url": "https://feeds.sbs.com.au/sbs-news-update"
+        }
+      },
+      "schedule": {
+        "enabled": true,
+        "time": "05:00",
+        "timezone": "Australia/Sydney"
+      }
+    },
+    "lakshana": {
+      "name": "Lakshana",
+      "sources": {
+        "ABC News Top Stories": {
+          "enabled": false,
           "url": "https://www.abc.net.au/feeds/101858056/podcast.xml",
           "description": "Australian news headlines (60-90 seconds)",
-          "custom": false
+          "custom": false,
+          "order": 0
+        },
+        "AI News Daily": {
+          "enabled": true,
+          "url": "https://ai-news-daily.podigee.io/feed/mp3",
+          "description": "AI technology news (5 minutes)",
+          "custom": false,
+          "order": 1
         },
         "BBC News 5min": {
           "enabled": false,
           "url": "https://podcast.voice.api.bbci.co.uk/rss/audio/p002vsmz?api_key=Wbek5zSqxz0Hk1blo5IBqbd9SCWIfNbT",
           "description": "World news bulletin (5 minutes)",
-          "custom": false
-        },
-        "SBS News Updates": {
-          "enabled": false,
-          "url": "https://feeds.sbs.com.au/sbs-news-update",
-          "description": "Australian/World news (morning/midday/evening)",
-          "custom": false
+          "custom": false,
+          "order": 2
         },
         "CNBC Business Update": {
           "enabled": false,
           "url": "https://feeds.simplecast.com/oloBAvaH",
           "description": "US market updates (3-5 minutes)",
-          "custom": false
+          "custom": false,
+          "order": 3
         },
         "CommSec Market Update": {
           "enabled": false,
           "url": "https://www.omnycontent.com/d/playlist/820f09cf-2ace-4180-a92d-aa4c0008f5fb/7ce30ada-3515-4538-a131-afef0177d550/1b3da022-8454-4155-8336-afef0177d567/podcast.rss",
           "description": "Australian market commentary",
-          "custom": false
+          "custom": false,
+          "order": 4
         },
-        "AI News Daily": {
+        "SBS News Updates": {
           "enabled": false,
-          "url": "https://ai-news-daily.podigee.io/feed/mp3",
-          "description": "AI technology news (5 minutes)",
-          "custom": false
+          "url": "https://feeds.sbs.com.au/sbs-news-update",
+          "description": "Australian/World news (morning/midday/evening)",
+          "custom": false,
+          "order": 5
         }
+      },
+      "schedule": {
+        "enabled": false,
+        "time": "06:00",
+        "timezone": "Australia/Sydney"
       }
     }
+  },
+  "device_profiles": {
+    "device_1769314502940_aj4313pls": "rohan",
+    "device_1769404208395_bdsbh2waz": "rohan"
   }
 }
