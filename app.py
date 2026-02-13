@@ -8,9 +8,11 @@ import os
 import fcntl
 import json
 import logging
+import re
 import threading
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import wraps
 from flask import Flask, render_template, request, jsonify, send_file, Response, stream_with_context, redirect
 from pathlib import Path
 from main import NewsBulletinAggregator
@@ -31,8 +33,30 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(24).hex())
 CONFIG_FILE = Path('config.json')
 OUTPUT_DIR = Path('output')
 
-# Scheduler instance (initialised in main block)
+# Scheduler instance (initialised at module level)
 bulletin_scheduler = None
+
+# Schedule defaults
+DEFAULT_SCHEDULE = {'enabled': False, 'time': '06:00', 'timezone': 'Australia/Sydney'}
+
+
+def require_profile(f):
+    """Decorator that loads config and validates profile_id exists."""
+    @wraps(f)
+    def wrapper(profile_id, *args, **kwargs):
+        config = load_config()
+        if profile_id not in config['profiles']:
+            return jsonify({'status': 'error', 'message': 'Profile not found'}), 404
+        return f(profile_id, config=config, *args, **kwargs)
+    return wrapper
+
+
+def get_mp3_files(limit=None):
+    """Get MP3 files from output directory, sorted newest first."""
+    if not OUTPUT_DIR.exists():
+        return []
+    files = sorted(OUTPUT_DIR.glob('*.mp3'), key=lambda f: f.stat().st_mtime, reverse=True)
+    return files[:limit] if limit else files
 
 # Default sources (available to all profiles)
 DEFAULT_SOURCES = {
@@ -131,7 +155,7 @@ def load_config():
             # Migrate: add schedule if missing
             for profile_id, profile in config['profiles'].items():
                 if 'schedule' not in profile:
-                    profile['schedule'] = {'enabled': False, 'time': '06:00', 'timezone': 'Australia/Sydney'}
+                    profile['schedule'] = DEFAULT_SCHEDULE.copy()
                     needs_save = True
 
             if needs_save:
@@ -210,15 +234,11 @@ def api_profiles():
 
 
 @app.route('/api/profiles/<profile_id>', methods=['DELETE'])
-def api_delete_profile(profile_id):
+@require_profile
+def api_delete_profile(profile_id, config=None):
     """Delete a profile"""
-    config = load_config()
-
     if profile_id == 'default':
         return jsonify({'status': 'error', 'message': 'Cannot delete default profile'}), 400
-
-    if profile_id not in config['profiles']:
-        return jsonify({'status': 'error', 'message': 'Profile not found'}), 404
 
     del config['profiles'][profile_id]
 
@@ -231,13 +251,9 @@ def api_delete_profile(profile_id):
 
 
 @app.route('/api/profiles/<profile_id>/switch', methods=['POST'])
-def api_switch_profile(profile_id):
+@require_profile
+def api_switch_profile(profile_id, config=None):
     """Switch active profile"""
-    config = load_config()
-
-    if profile_id not in config['profiles']:
-        return jsonify({'status': 'error', 'message': 'Profile not found'}), 404
-
     config['active_profile'] = profile_id
     save_config(config)
 
@@ -245,12 +261,9 @@ def api_switch_profile(profile_id):
 
 
 @app.route('/api/profiles/<profile_id>/sources', methods=['POST'])
-def api_update_sources(profile_id):
+@require_profile
+def api_update_sources(profile_id, config=None):
     """Update sources for a profile"""
-    config = load_config()
-
-    if profile_id not in config['profiles']:
-        return jsonify({'status': 'error', 'message': 'Profile not found'}), 404
 
     sources = request.json.get('sources', {})
     config['profiles'][profile_id]['sources'] = sources
@@ -260,12 +273,9 @@ def api_update_sources(profile_id):
 
 
 @app.route('/api/profiles/<profile_id>/custom-source', methods=['POST', 'DELETE'])
-def api_custom_source(profile_id):
+@require_profile
+def api_custom_source(profile_id, config=None):
     """Add or remove custom source"""
-    config = load_config()
-
-    if profile_id not in config['profiles']:
-        return jsonify({'status': 'error', 'message': 'Profile not found'}), 404
 
     if request.method == 'POST':
         data = request.json
@@ -302,12 +312,9 @@ def api_custom_source(profile_id):
 
 
 @app.route('/api/profiles/<profile_id>/sources/reorder', methods=['POST'])
-def api_reorder_sources(profile_id):
+@require_profile
+def api_reorder_sources(profile_id, config=None):
     """Reorder sources for a profile"""
-    config = load_config()
-
-    if profile_id not in config['profiles']:
-        return jsonify({'status': 'error', 'message': 'Profile not found'}), 404
 
     data = request.json
     order_list = data.get('order', [])
@@ -325,13 +332,9 @@ def api_reorder_sources(profile_id):
 
 
 @app.route('/api/profiles/<profile_id>/staleness')
-def api_staleness(profile_id):
+@require_profile
+def api_staleness(profile_id, config=None):
     """Check staleness of all enabled sources for a profile"""
-    config = load_config()
-
-    if profile_id not in config['profiles']:
-        return jsonify({'status': 'error', 'message': 'Profile not found'}), 404
-
     profile_data = config['profiles'][profile_id]
     enabled_sources = {
         name: data['url']
@@ -339,7 +342,7 @@ def api_staleness(profile_id):
         if isinstance(data, dict) and data.get('enabled')
     }
 
-    aggregator = NewsBulletinAggregator(output_dir='output')
+    aggregator = NewsBulletinAggregator(output_dir=str(OUTPUT_DIR))
     results = {}
 
     def _check(name, url):
@@ -378,7 +381,7 @@ def api_device_profile(device_id):
             return jsonify({'status': 'error', 'message': 'Profile ID required'}), 400
 
         if profile_id not in config['profiles']:
-            return jsonify({'status': 'error', 'message': 'Profile does not exist'}), 404
+                return jsonify({'status': 'error', 'message': 'Profile does not exist'}), 404
 
         # Save device-profile mapping
         if 'device_profiles' not in config:
@@ -419,7 +422,7 @@ def api_generate():
                 'message': 'No sources enabled'
             }), 400
 
-        generator = EnhancedBulletinGenerator(output_dir='output')
+        generator = EnhancedBulletinGenerator(output_dir=str(OUTPUT_DIR))
         result = None
 
         for event in generator.generate_with_progress(enabled_sources, active_profile):
@@ -477,7 +480,7 @@ def api_generate_trigger():
                 if not enabled_sources:
                     logger.warning(f"Trigger: no enabled sources for {target_profile}")
                     return
-                generator = EnhancedBulletinGenerator(output_dir='output')
+                generator = EnhancedBulletinGenerator(output_dir=str(OUTPUT_DIR))
                 for event in generator.generate_with_progress(enabled_sources, target_profile):
                     if event.get('stage') == 'complete':
                         logger.info(f"Trigger: bulletin complete - {event.get('filename')}")
@@ -522,14 +525,13 @@ def api_recent_files():
     """Get list of recently generated bulletins"""
     try:
         files = []
-        if OUTPUT_DIR.exists():
-            for file in sorted(OUTPUT_DIR.glob('*.mp3'), reverse=True)[:10]:
-                stat = file.stat()
-                files.append({
-                    'filename': file.name,
-                    'size': stat.st_size,
-                    'modified': datetime.fromtimestamp(stat.st_mtime).isoformat()
-                })
+        for file in get_mp3_files(limit=10):
+            stat = file.stat()
+            files.append({
+                'filename': file.name,
+                'size': stat.st_size,
+                'modified': datetime.fromtimestamp(stat.st_mtime).isoformat()
+            })
         return jsonify({'files': files})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -542,8 +544,8 @@ def api_email_bulletin(filename):
         # Input validation: Sanitize filename to prevent path traversal
         file_path = OUTPUT_DIR / filename
 
-        # Security: Verify file exists and is within output directory
-        if not file_path.exists() or not file_path.is_relative_to(OUTPUT_DIR):
+        # Security: Verify file is within output directory and exists
+        if not file_path.is_relative_to(OUTPUT_DIR) or not file_path.exists():
             return jsonify({'status': 'error', 'message': 'File not found'}), 404
 
         # Get profile name from filename (format: profile_timestamp.mp3)
@@ -610,8 +612,7 @@ def api_latest_bulletin():
         if not OUTPUT_DIR.exists():
             return jsonify({'error': 'No bulletins available'}), 404
 
-        # Find most recent bulletin file
-        mp3_files = sorted(OUTPUT_DIR.glob('*.mp3'), key=lambda f: f.stat().st_mtime, reverse=True)
+        mp3_files = get_mp3_files()
 
         if not mp3_files:
             return jsonify({'error': 'No bulletins found'}), 404
@@ -668,7 +669,7 @@ def api_generate_stream():
                 return
 
             logger.info(f"Starting enhanced generation with {len(enabled_sources)} sources")
-            generator = EnhancedBulletinGenerator(output_dir='output')
+            generator = EnhancedBulletinGenerator(output_dir=str(OUTPUT_DIR))
 
             for event in generator.generate_with_progress(enabled_sources, active_profile):
                 yield f"data: {json.dumps(event, default=str)}\n\n"
@@ -725,7 +726,7 @@ def api_test_source():
             return jsonify({'status': 'error', 'message': 'Name and URL required'}), 400
 
         # Create temporary aggregator
-        aggregator = NewsBulletinAggregator(output_dir='output')
+        aggregator = NewsBulletinAggregator(output_dir=str(OUTPUT_DIR))
 
         # Try to fetch the source
         audio_file = aggregator.fetch_latest_bulletin(source_name, source_url)
@@ -768,24 +769,21 @@ def api_test_source():
 
 
 @app.route('/api/profiles/<profile_id>/schedule', methods=['GET', 'PUT'])
-def api_profile_schedule(profile_id):
+@require_profile
+def api_profile_schedule(profile_id, config=None):
     """Get or update schedule for a profile"""
-    config = load_config()
-
-    if profile_id not in config['profiles']:
-        return jsonify({'status': 'error', 'message': 'Profile not found'}), 404
-
     if request.method == 'GET':
-        schedule = config['profiles'][profile_id].get('schedule', {
-            'enabled': False, 'time': '06:00', 'timezone': 'Australia/Sydney'
-        })
+        schedule = config['profiles'][profile_id].get('schedule', DEFAULT_SCHEDULE.copy())
         return jsonify({'schedule': schedule})
 
     elif request.method == 'PUT':
         data = request.json or {}
+        time_str = data.get('time', '06:00')
+        if not re.match(r'^\d{2}:\d{2}$', time_str):
+            return jsonify({'status': 'error', 'message': 'Time must be HH:MM format'}), 400
         schedule = {
             'enabled': data.get('enabled', False),
-            'time': data.get('time', '06:00'),
+            'time': time_str,
             'timezone': data.get('timezone', 'Australia/Sydney')
         }
 
@@ -825,8 +823,7 @@ def api_cleanup():
         if not OUTPUT_DIR.exists():
             return jsonify({'status': 'success', 'deleted': 0, 'kept': 0})
 
-        # Get all MP3 files sorted by modification time (newest first)
-        mp3_files = sorted(OUTPUT_DIR.glob('*.mp3'), key=lambda f: f.stat().st_mtime, reverse=True)
+        mp3_files = get_mp3_files()
 
         deleted_count = 0
         kept_count = 0
@@ -867,11 +864,11 @@ def api_storage_info():
         if not OUTPUT_DIR.exists():
             return jsonify({'total_size': 0, 'file_count': 0, 'files': []})
 
-        mp3_files = list(OUTPUT_DIR.glob('*.mp3'))
+        mp3_files = get_mp3_files()
         total_size = sum(f.stat().st_size for f in mp3_files)
 
         files_info = []
-        for file in sorted(mp3_files, key=lambda f: f.stat().st_mtime, reverse=True):
+        for file in mp3_files:
             stat = file.stat()
             age_days = (datetime.now() - datetime.fromtimestamp(stat.st_mtime)).days
             files_info.append({

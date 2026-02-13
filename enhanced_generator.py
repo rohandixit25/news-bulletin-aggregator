@@ -6,10 +6,11 @@ audio normalisation, chapter markers, and graceful error handling.
 
 import logging
 import json
-import queue
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
+from queue import Queue
 from typing import Dict, Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pydub import AudioSegment
@@ -34,10 +35,12 @@ class EnhancedBulletinGenerator(NewsBulletinAggregator):
 
     def _copy_to_gdrive(self, output_path: Path):
         """Upload bulletin to Google Drive via API, or copy to local sync folder as fallback."""
+        from app import load_config
+        config = load_config()
+
+        # Try Drive API upload first
         try:
             from gdrive_uploader import GDriveUploader
-            from app import load_config
-            config = load_config()
             folder_id = config.get('gdrive_folder_id')
             uploader = GDriveUploader()
             file_id = uploader.upload(output_path, folder_name='News', folder_id=folder_id)
@@ -48,20 +51,15 @@ class EnhancedBulletinGenerator(NewsBulletinAggregator):
             logger.debug(f"Drive API upload unavailable: {e}")
 
         # Fallback: local sync folder copy
+        gdrive_path = config.get('gdrive_path')
+        if not gdrive_path:
+            return
         try:
-            from app import load_config
-            config = load_config()
-            gdrive_path = config.get('gdrive_path')
-            if not gdrive_path:
-                return
-
             dest_dir = Path(gdrive_path)
             if not dest_dir.is_dir():
                 return
-
-            dest_file = dest_dir / output_path.name
-            shutil.copy2(str(output_path), str(dest_file))
-            logger.info(f"Copied bulletin to Google Drive folder: {dest_file}")
+            shutil.copy2(str(output_path), str(dest_dir / output_path.name))
+            logger.info(f"Copied bulletin to Google Drive folder: {dest_dir / output_path.name}")
         except Exception as e:
             logger.warning(f"Failed to copy to Google Drive: {e}")
 
@@ -98,7 +96,7 @@ class EnhancedBulletinGenerator(NewsBulletinAggregator):
                 'progress': 0
             }
 
-            progress_queue = queue.Queue()
+            progress_queue = Queue()
 
             def _download(source_name, feed_url):
                 """Download a single source and put result on queue."""
@@ -190,7 +188,7 @@ class EnhancedBulletinGenerator(NewsBulletinAggregator):
             }
 
             timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-            profile_slug = profile_name.replace(' ', '_').lower()
+            profile_slug = re.sub(r'[^a-z0-9_]', '', profile_name.replace(' ', '_').lower())
             output_filename = f"{profile_slug}_{timestamp}.mp3"
 
             try:

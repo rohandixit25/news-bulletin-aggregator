@@ -5,8 +5,11 @@ News Bulletin Aggregator - Combines daily news bulletins into one audio file
 
 import os
 import logging
+import time
+from calendar import timegm
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import urlparse
 import feedparser
 import requests
 from pydub import AudioSegment
@@ -86,7 +89,8 @@ class NewsBulletinAggregator:
             response.raise_for_status()
 
             # Save to temp directory
-            file_extension = audio_url.split('.')[-1].split('?')[0]
+            url_path = urlparse(audio_url).path
+            file_extension = url_path.rsplit('.', 1)[-1] if '.' in url_path else 'mp3'
             if file_extension not in ['mp3', 'wav', 'm4a', 'aac']:
                 file_extension = 'mp3'
 
@@ -176,8 +180,6 @@ class NewsBulletinAggregator:
             latest = feed.entries[0]
             title = latest.get('title', 'Unknown')
 
-            import time
-            from calendar import timegm
             published = latest.get('published_parsed') or latest.get('updated_parsed')
             if published:
                 entry_timestamp = timegm(published)

@@ -55,7 +55,7 @@ function formatDate(dateString) {
         yesterday.setDate(yesterday.getDate() - 1);
         if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
         return date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
-    } catch { return dateString; }
+    } catch (e) { return dateString; }
 }
 
 function formatTime(seconds) {
@@ -346,7 +346,7 @@ function updateMediaSessionState() {
             playbackRate: audio.playbackRate,
             position: audio.currentTime
         });
-    } catch {}
+    } catch (e) { console.warn(e); }
 }
 
 // Playback position persistence
@@ -369,14 +369,14 @@ function restorePlaybackPosition() {
             audio.currentTime = savedPos;
             showToast(`Resuming from ${formatTime(savedPos)}`);
         }
-    } catch {}
+    } catch (e) { console.warn(e); }
 }
 
 // Wake Lock
 if ('wakeLock' in navigator) {
     let wakeLock = null;
     audio.addEventListener('play', async () => {
-        try { wakeLock = await navigator.wakeLock.request('screen'); } catch {}
+        try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { /* expected on unsupported browsers */ }
     });
     audio.addEventListener('pause', () => {
         if (wakeLock) { wakeLock.release(); wakeLock = null; }
@@ -645,7 +645,7 @@ async function saveSourceOrder() {
                 profiles[currentProfileId].sources[name].order = idx;
             }
         });
-    } catch {}
+    } catch (e) { console.warn(e); }
 }
 
 // Staleness checking
@@ -670,7 +670,7 @@ async function checkStaleness() {
                 badge.textContent = info.age_hours ? `${Math.round(info.age_hours)}h ago` : 'OK';
             }
         });
-    } catch {}
+    } catch (e) { console.warn(e); }
 }
 
 // Profile selector change
@@ -736,7 +736,7 @@ document.getElementById('generate-btn').addEventListener('click', () => {
                 es.close();
                 resetGenerateBtn(btn);
             }
-        } catch {}
+        } catch (e) { console.warn(e); }
     };
 
     es.onerror = () => {
@@ -893,7 +893,7 @@ async function loadSchedule() {
                 nextRunEl.textContent = sched.enabled ? 'Scheduled (pending)' : '';
             }
         }
-    } catch {}
+    } catch (e) { console.warn(e); }
 }
 
 async function saveSchedule() {
@@ -965,7 +965,7 @@ async function loadStorageInfo() {
         const data = await res.json();
         document.getElementById('stat-file-count').textContent = data.file_count || 0;
         document.getElementById('stat-total-size').textContent = formatFileSize(data.total_size || 0);
-    } catch {}
+    } catch (e) { console.warn(e); }
 }
 
 document.getElementById('cleanup-btn').addEventListener('click', async () => {

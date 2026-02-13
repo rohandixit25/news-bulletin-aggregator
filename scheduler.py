@@ -4,6 +4,7 @@ Bulletin Scheduler - APScheduler integration for automatic bulletin generation.
 """
 
 import logging
+import re
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -54,6 +55,10 @@ class BulletinScheduler:
 
         # Remove existing job if any
         self.remove_schedule(profile_id)
+
+        if not re.match(r'^\d{2}:\d{2}$', time_str):
+            logger.error(f"Invalid time format for {profile_id}: {time_str} (expected HH:MM)")
+            return
 
         try:
             hour, minute = time_str.split(':')

@@ -1,438 +1,263 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with code in this repository.
 
 ## Repository Overview
 
-News Bulletin Aggregator - Automatically fetches news bulletins from multiple RSS podcast feeds (ABC, BBC, SBS, CNBC, CommSec, AI News Daily), combines them into a single MP3 file, and delivers via web interface or email. Built with Python Flask, includes profile management for personalised news preferences.
+News Bulletin Aggregator — a consumer-grade daily news briefing app. Fetches audio bulletins from RSS podcast feeds (ABC, BBC, SBS, CNBC, CommSec, AI News Daily), combines them into a single normalised MP3 with chapter markers, uploads to Google Drive, and serves via a dark-themed PWA with integrated audio player. Deployed on Render with external cron-triggered generation.
 
-**Location**: All application code is in `/workspace/news_bulletin_aggregator/`
+**Location**: `/workspace/news_bulletin_aggregator/`
+**Live URL**: `https://news-bulletin-aggregator.onrender.com`
+**Render tier**: Free (spins down after 15 min inactivity)
 
 ## Running the Application
 
-### Command-Line Mode (Quick Test)
+### Local Development
 ```bash
 cd /workspace/news_bulletin_aggregator
+pip install -r requirements.txt
+python3 app.py
+```
+Opens at `http://localhost:5000`. Uses Flask dev server with `use_reloader=False` (required for APScheduler compatibility).
+
+### Production (Render)
+Uses gunicorn via Dockerfile:
+```
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--timeout", "300", "--threads", "4", "app:app"]
+```
+
+### CLI Mode (Quick Test)
+```bash
 python3 main.py
 ```
-This generates a combined bulletin from all sources defined in `main.py` and saves to `output/news_bulletin_YYYY-MM-DD.mp3`.
-
-### Web Interface (Recommended)
-```bash
-cd /workspace/news_bulletin_aggregator
-python3 app.py
-```
-Then open browser to `http://localhost:5000`
-
-**Web features:**
-- Profile management (create profiles for different users)
-- Source selection (enable/disable feeds per profile)
-- Custom RSS feed addition
-- One-click bulletin generation
-- Recent files browser with download
-- Email delivery to any address
-
-### Mobile Player (iPhone/Android)
-```bash
-cd /workspace/news_bulletin_aggregator
-python3 app.py
-```
-Then on your iPhone, open Safari and navigate to `http://YOUR_IP:5000/player`
-
-**Mobile features:**
-- Progressive Web App (PWA) - install as app icon on home screen
-- One-tap playback of latest bulletin
-- Lock screen controls (play/pause/skip from locked screen)
-- Background playback (continues when switching apps)
-- Playback speed control (0.75x to 2.0x)
-- Skip forward/back 15 seconds
-- No App Store required
-
-**See `IPHONE_SETUP.md` for detailed installation instructions.**
-
-### First-Time Setup
-
-1. **Install dependencies:**
-```bash
-pip install -r requirements.txt
-```
-
-2. **Install ffmpeg** (required for audio processing):
-```bash
-# Debian/Ubuntu
-sudo apt-get install ffmpeg
-
-# macOS
-brew install ffmpeg
-```
-
-3. **Configure email (optional):**
-Create `.env` file from template:
-```bash
-cp .env.example .env
-# Edit .env with SMTP credentials
-```
+Generates a combined bulletin from hardcoded sources in `main.py` to `output/news_bulletin_YYYY-MM-DD.mp3`. No profile awareness — use the web app instead.
 
 ## Architecture
 
-### Component Overview
+### File Structure
 ```
-├── main.py                    # CLI script for quick bulletin generation
-├── app.py                     # Flask web application (primary interface)
-├── email_sender.py            # SMTP email delivery module
-├── config.json                # Profile and source configuration
+├── app.py                     # Flask web app — routes, config, API endpoints
+├── main.py                    # NewsBulletinAggregator — RSS fetch, audio combine, staleness check
+├── enhanced_generator.py      # EnhancedBulletinGenerator — parallel downloads, progress, chapters, GDrive upload
+├── scheduler.py               # BulletinScheduler — APScheduler cron wrapper
+├── gdrive_uploader.py         # GDriveUploader — Google Drive API v3 OAuth2 upload
+├── email_sender.py            # EmailSender — SMTP delivery with attachment
+├── config.json                # Runtime config — profiles, sources, schedules, GDrive folder ID
+├── Dockerfile                 # Production container (python:3.11-slim + ffmpeg + gunicorn)
 ├── requirements.txt           # Python dependencies
 ├── .env.example               # Environment variable template
-├── static/                    # CSS and JavaScript for web UI
-│   ├── css/style.css         # Quantium-branded styles
-│   └── js/app.js             # Frontend logic
+├── static/
+│   ├── css/style.css          # Dark theme unified styles
+│   ├── js/app.js              # Unified SPA — tabs, player, sources, settings
+│   └── manifest.json          # PWA manifest
 └── templates/
-    └── index.html            # Main web interface
+    └── index.html             # Single-page tabbed app (Player | Sources | Settings)
 ```
 
-### Core Architecture
-
-**Orchestrator Pattern:**
+### Core Flow
 ```
-Flask App (app.py)
-    ├── NewsBulletinAggregator (main.py)  → RSS fetching + audio combining
-    └── EmailSender (email_sender.py)     → SMTP delivery
+External cron (cron-job.org)
+    → POST /api/generate/trigger?token=CRON_SECRET
+        → EnhancedBulletinGenerator.generate_with_progress()
+            → Parallel RSS download (ThreadPoolExecutor, 4 workers)
+            → Audio normalisation (pydub dBFS levelling to -20 dBFS)
+            → Combine with chapter markers (cumulative time offsets)
+            → Export MP3 + metadata JSON
+            → GDriveUploader.upload() to folder ID in config
 ```
 
 ### Component Responsibilities
 
-**`main.py` - NewsBulletinAggregator Class**
-- Fetches latest episodes from RSS podcast feeds using `feedparser`
-- Downloads audio enclosures (MP3/M4A) via `requests`
-- Combines multiple audio files with 2-second gaps using `pydub`
-- Saves to `output/` directory with timestamped filenames
-- Can be used standalone (CLI) or imported by Flask app
+**`app.py`** — Flask web application (903 lines)
+- `require_profile` decorator — DRY profile validation for all profile endpoints
+- `get_mp3_files(limit)` — helper for sorted MP3 file listing
+- `load_config()` / `save_config()` — JSON config with `fcntl.flock()` file locking
+- Config auto-migration: adds `order` to sources, `schedule` to profiles
+- Module-level scheduler initialisation (works under both dev server and gunicorn)
 
-**`app.py` - Flask Web Application**
-- Routes:
-  - `GET /` - Main interface with profile selector
-  - `POST /api/generate` - Generate bulletin with active profile sources
-  - `GET /api/config` - Retrieve configuration
-  - `POST /api/config` - Update configuration
-  - `POST /api/profiles` - Create new profile
-  - `DELETE /api/profiles/<id>` - Delete profile
-  - `POST /api/profiles/<id>/switch` - Switch active profile
-  - `POST /api/profiles/<id>/sources` - Update profile sources
-  - `POST /api/profiles/<id>/custom-source` - Add custom RSS feed
-  - `DELETE /api/profiles/<id>/custom-source` - Remove custom feed
-  - `GET /api/recent-files` - List generated bulletins
-  - `GET /api/download/<filename>` - Download bulletin file
-  - `POST /api/email/<filename>` - Email bulletin to recipient
+**`main.py`** — NewsBulletinAggregator class
+- `fetch_latest_bulletin(source, url)` — download single RSS audio enclosure
+- `fetch_bulletins_parallel(max_workers=4)` — concurrent downloads preserving source order
+- `normalise_audio(segment, target_dbfs=-20.0)` — loudness normalisation
+- `check_feed_staleness(source, url, max_age_hours=12)` — RSS freshness check
+- `combine_audio_files(files, output)` — concatenate with 2s silence gaps
 
-**`email_sender.py` - EmailSender Class**
-- SMTP email delivery with TLS encryption
-- HTML email formatting with inline CSS
-- MP3 attachment support
-- Environment-based configuration (`.env` file)
-- Configurable sender and recipient addresses
+**`enhanced_generator.py`** — EnhancedBulletinGenerator (extends NewsBulletinAggregator)
+- `generate_with_progress(sources, profile)` — generator yielding SSE-compatible progress events
+- Parallel downloads with per-source progress tracking
+- Chapter marker data saved in metadata JSON
+- Auto-uploads to Google Drive via `GDriveUploader`
+- Falls back to local folder copy if Drive API unavailable
 
-**`config.json` - Configuration Structure**
+**`scheduler.py`** — BulletinScheduler (wraps APScheduler BackgroundScheduler)
+- `init_app(flask_app)` — loads schedules from config, starts scheduler
+- `add_schedule(profile_id, time_str, timezone)` — CronTrigger job
+- Time format validation: `re.match(r'^\d{2}:\d{2}$', time_str)`
+- Note: APScheduler only fires if the process stays alive — Render free tier spins down, so use external cron instead
+
+**`gdrive_uploader.py`** — GDriveUploader
+- OAuth2 with `drive.file` scope
+- Auth priority: `GDRIVE_TOKEN` env var → `gdrive_token.json` file → OAuth flow
+- `upload(file_path, folder_name, folder_id)` — uploads to specific Drive folder
+- Config stores `gdrive_folder_id` to avoid creating duplicate folders
+
+## API Endpoints
+
+### Generation
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/generate` | Synchronous generation (returns when done) |
+| GET | `/api/generate/stream` | SSE stream with per-source progress events |
+| POST/GET | `/api/generate/trigger?token=X` | Background generation for external cron |
+
+### Profiles
+| Method | Path | Description |
+|--------|------|-------------|
+| GET/POST | `/api/profiles` | List or create profiles |
+| DELETE | `/api/profiles/<id>` | Delete profile |
+| POST | `/api/profiles/<id>/switch` | Switch active profile |
+| POST | `/api/profiles/<id>/sources` | Update profile sources |
+| POST/DELETE | `/api/profiles/<id>/custom-source` | Add/remove custom RSS feed |
+| POST | `/api/profiles/<id>/sources/reorder` | Reorder sources (drag-and-drop) |
+| GET | `/api/profiles/<id>/staleness` | Check RSS feed freshness |
+| GET/PUT | `/api/profiles/<id>/schedule` | Get/update schedule |
+
+### Bulletins
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/latest-bulletin` | Most recent bulletin metadata |
+| GET | `/api/recent-files` | Last 10 bulletins |
+| GET | `/api/download/<filename>` | Download MP3 |
+| GET | `/api/bulletin/<filename>/metadata` | Chapter markers + generation metadata |
+| POST | `/api/email/<filename>` | Email bulletin to recipient |
+
+### System
+| Method | Path | Description |
+|--------|------|-------------|
+| GET/POST | `/api/config` | Raw config get/set |
+| GET/POST | `/api/device/<id>/profile` | Device-profile mapping |
+| GET | `/api/schedules` | Active scheduler jobs |
+| POST | `/api/cleanup` | Delete old bulletins |
+| GET | `/api/storage-info` | Disk usage |
+| POST | `/api/test-source` | Test an RSS feed |
+
+## Configuration
+
+### config.json Structure
 ```json
 {
-  "active_profile": "profile_id",
+  "gdrive_folder_id": "1JrXPZfRFawvGGp7xOiXDJnfsn3zlXkQz",
+  "active_profile": "rohan",
   "profiles": {
-    "profile_id": {
-      "name": "Display Name",
+    "rohan": {
+      "name": "Rohan",
       "sources": {
-        "Source Name": {
+        "ABC News Top Stories": {
           "enabled": true,
-          "url": "https://feed.url/rss.xml",
-          "description": "Feed description",
+          "url": "https://...",
+          "description": "...",
+          "order": 0,
           "custom": false
         }
+      },
+      "schedule": {
+        "enabled": true,
+        "time": "05:00",
+        "timezone": "Australia/Sydney"
       }
     }
-  }
+  },
+  "device_profiles": { "device_xxx": "rohan" }
 }
 ```
 
-### Key Design Decisions
+### Environment Variables
 
-**Profile-Based Configuration**: Multiple users can have personalised news source selections. Each profile independently tracks enabled/disabled sources and custom feeds. Active profile determines which sources are fetched during generation.
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SECRET_KEY` | No | Flask secret key (auto-generated if missing) |
+| `CRON_SECRET` | Recommended | Auth token for `/api/generate/trigger` |
+| `GDRIVE_TOKEN` | For Render | JSON string of Google OAuth2 token |
+| `SMTP_HOST` | For email | SMTP server (default: smtp.gmail.com) |
+| `SMTP_PORT` | For email | SMTP port (default: 587) |
+| `SMTP_USERNAME` | For email | SMTP username |
+| `SMTP_PASSWORD` | For email | SMTP password (Gmail App Password) |
+| `DIGEST_SENDER_EMAIL` | For email | Sender address |
 
-**Web-First Design**: Flask app is the primary interface. CLI script (`main.py`) exists for testing and automation but lacks profile awareness.
+### Google Drive Setup
 
-**RSS Feed Strategy**: Uses publicly available podcast RSS feeds that update regularly (daily or multiple times daily). No API keys required for news sources themselves.
+Bulletins are auto-uploaded to Google Drive after generation.
 
-**Audio Processing**: ffmpeg handles format conversion, pydub provides Python interface. 2-second silence gaps between bulletins for clear separation.
+**Local development**: Uses `gdrive_credentials.json` + `gdrive_token.json` (OAuth2 Desktop app flow)
 
-**File Management**: Generated bulletins saved with profile name and timestamp to avoid conflicts. Recent files API shows last 10 bulletins. Output directory excluded from git via `.gitignore`.
+**Render deployment**: Set `GDRIVE_TOKEN` env var containing the JSON contents of `gdrive_token.json`
 
-## Environment Setup
+The target Drive folder ID is stored in `config.json` as `gdrive_folder_id` to prevent duplicate folder creation.
 
-### Required Files
+## Deployment (Render)
 
-**`.env` file** (copy from `.env.example`):
+### Setup
+1. Push to GitHub
+2. Create Web Service on Render, connect repo
+3. Set environment: Docker, branch main
+4. Add env vars: `CRON_SECRET`, `GDRIVE_TOKEN`
+5. Deploy
+
+### Daily Cron
+Render free tier spins down after 15 min. Use an external cron service (e.g., cron-job.org) to trigger generation:
+- URL: `https://news-bulletin-aggregator.onrender.com/api/generate/trigger?token=YOUR_CRON_SECRET`
+- Method: GET
+- Schedule: `0 18 * * *` (UTC) = 5:00 AM Sydney time (AEDT, UTC+11)
+- Adjust for daylight saving: AEST (UTC+10) would be `0 19 * * *`
+
+### Updating
 ```bash
-# SMTP Configuration (for email delivery)
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USERNAME=your-email@gmail.com
-SMTP_PASSWORD=your-app-password
-DIGEST_SENDER_EMAIL=your-email@gmail.com
+git add <files> && git commit -m "message" && git push
 ```
+Render auto-deploys from main branch.
 
-**Gmail App Password** (recommended for SMTP):
-1. Google Account → Security → Enable 2-Step Verification
-2. Security → App passwords → Generate for "Mail"
-3. Use 16-character password in `.env` as `SMTP_PASSWORD`
+## Web UI
 
-See `EMAIL_SETUP_GUIDE.md` for detailed SMTP configuration instructions.
+Single-page dark-themed app with 3 tabs:
 
-### Dependencies
+- **Player**: Audio player with chapter markers, lock screen controls (Media Session API), wake lock, speed control, skip ±15s, position persistence
+- **Sources**: Drag-and-drop source ordering (HTML5 DnD + touch fallback for iOS), enable/disable toggles, staleness badges, add custom sources, generate button with SSE progress
+- **Settings**: Profile management, schedule config (time + timezone), recent bulletins, storage management, email
 
-**Python packages** (see `requirements.txt`):
-- `flask` - Web framework
-- `feedparser` - RSS feed parsing
-- `requests` - HTTP downloads
-- `pydub` - Audio manipulation
-- `python-dotenv` - Environment variable loading
+**Design**: Dark theme (`#000006` bg, `#FFE600` accent, `#44d5a3` turquoise), Roboto font, mobile-first, PWA installable
 
-**System requirements**:
-- Python 3.7+
-- ffmpeg (audio processing)
+## Code Patterns
 
-## Customisation
-
-### Adding News Sources
-
-**Via Web UI** (recommended):
-1. Select profile
-2. Click "Add Custom Source"
-3. Enter name, RSS URL, description
-4. Enable the new source
-
-**Via `config.json`** (manual):
-```json
-{
-  "Source Name": {
-    "enabled": true,
-    "url": "https://podcast.rss.url/feed.xml",
-    "description": "Brief description (duration)",
-    "custom": true
-  }
-}
-```
-
-**Finding RSS feeds:**
-- Look for "Subscribe" or "RSS" links on news podcast pages
-- Check for `<link rel="alternate" type="application/rss+xml">` in page source
-- Most news sites provide podcast RSS feeds for free
-
-### Default News Sources
-
-Currently configured (can be enabled/disabled per profile):
-- **ABC News Top Stories**: 60-90 second Australian headlines
-- **BBC News 5min**: World news bulletin (5 minutes)
-- **SBS News Updates**: Australian/World news (morning/midday/evening)
-- **CNBC Business Update**: US market updates (3-5 minutes)
-- **CommSec Market Update**: Australian market commentary
-- **AI News Daily**: AI technology news (5 minutes)
-
-### Adjusting Audio Processing
-
-**Change silence between bulletins** (`main.py` line 127):
+### Profile Validation
+All profile endpoints use the `@require_profile` decorator which loads config and returns 404 if profile missing:
 ```python
-silence = AudioSegment.silent(duration=2000)  # milliseconds
+@app.route('/api/profiles/<profile_id>/...')
+@require_profile
+def my_endpoint(profile_id, config=None):
+    # config is pre-loaded, profile_id is validated
 ```
 
-**Change audio format** (`main.py` line 136):
-```python
-combined.export(str(output_path), format='mp3')  # Options: mp3, wav, ogg
-```
+### File Listing
+Use `get_mp3_files(limit=None)` instead of manually globbing OUTPUT_DIR.
 
-### Modifying Web Interface
+### Config Locking
+`load_config()` uses `fcntl.LOCK_SH`, `save_config()` uses `fcntl.LOCK_EX`. Always use these functions — never read/write config.json directly.
 
-**Styling**: Edit `static/css/style.css` - Uses Quantium brand colours (black #000000, yellow #FFE600)
+### Filename Sanitisation
+Profile names in filenames use: `re.sub(r'[^a-z0-9_]', '', name.replace(' ', '_').lower())`
 
-**Frontend logic**: Edit `static/js/app.js` - Vanilla JavaScript, no framework dependencies
+## Protected Files (Never Commit)
+- `.env` — SMTP credentials
+- `gdrive_credentials.json` — Google OAuth2 client secret
+- `gdrive_token.json` — Google OAuth2 refresh token
+- `client_secret_*.json` — Google credentials download
+- `output/*.mp3` — Generated audio
+- `output/*.json` — Bulletin metadata
 
-**Layout**: Edit `templates/index.html` - Jinja2 template with Flask integration
+All listed in `.gitignore`.
 
-## Automation
-
-### Daily Generation with Cron (Linux/macOS)
-
-**Command-line version:**
-```bash
-crontab -e
-# Add:
-0 7 * * * cd /workspace/news_bulletin_aggregator && /usr/bin/python3 main.py
-```
-
-**Web interface version** (requires API call):
-```bash
-crontab -e
-# Add:
-0 7 * * * curl -X POST http://localhost:5000/api/generate
-```
-
-**Note**: Web interface must be running for API-based automation.
-
-### Scheduled Email Delivery
-
-Create a script that generates and emails:
-```bash
-#!/bin/bash
-cd /workspace/news_bulletin_aggregator
-FILENAME=$(python3 -c "from datetime import datetime; print(f'news_bulletin_{datetime.now().strftime(\"%Y-%m-%d\")}.mp3')")
-python3 main.py
-curl -X POST http://localhost:5000/api/email/$FILENAME -H "Content-Type: application/json" -d '{"email": "recipient@example.com"}'
-```
-
-## Troubleshooting
-
-### "No audio found in latest bulletin"
-Some RSS feeds may not include audio enclosures in every episode. The app skips these and continues with other sources. Check feed URL in browser to verify audio links exist.
-
-### "ffmpeg not found"
-Install ffmpeg (see First-Time Setup section). pydub requires ffmpeg for audio format conversion.
-
-### RSS Feeds Not Loading
-- Check internet connectivity
-- Verify RSS URL is correct (test in browser)
-- Some feeds may be temporarily unavailable
-- Check feed format (must be valid RSS/Atom with audio enclosures)
-
-### SMTP Authentication Failed
-- Gmail requires App Password, not regular account password
-- Ensure 2-Step Verification is enabled in Google Account
-- Verify `SMTP_USERNAME` and `SMTP_PASSWORD` in `.env`
-- Check SMTP host/port match your provider
-
-### Web Interface Not Loading
-- Ensure Flask app is running: `python3 app.py`
-- Check port 5000 is not in use: `lsof -i :5000`
-- Verify no firewall blocking localhost:5000
-
-### Profile Changes Not Saving
-- Check file permissions on `config.json`
-- Verify JSON syntax is valid (use `python3 -m json.tool config.json`)
-- Check browser console for JavaScript errors
-
-### Generated File Too Large for Email
-Most email providers limit attachments to 25MB. To reduce file size:
-- Enable fewer sources per profile
-- Use shorter news bulletins (disable 5-minute sources)
-- Consider hosting files and sending links instead
-
-## Security Practices
-
-This codebase implements security best practices:
-
-- ✅ Environment variables for credentials (never hardcoded)
-- ✅ TLS encryption for SMTP
-- ✅ Path traversal prevention in file downloads (`is_relative_to()` check)
-- ✅ Input validation on email addresses and filenames
-- ✅ Flask secret key for session security
-- ✅ Sensitive data excluded from logs
-- ✅ `.env` and output files excluded from git
-- ✅ HTTPS for external RSS feed requests
-- ✅ Content-Type validation for audio downloads
-
-When modifying code, maintain these patterns:
-- Never log email addresses, credentials, or file contents
-- Validate all user inputs (email addresses, RSS URLs, profile names)
-- Use path validation for file operations
-- Sanitise filenames to prevent path traversal
-- Keep `.env` excluded from version control
-
-## Development Guidelines
-
-### Before Making Changes
-
-1. **Test current functionality**: Run `python3 main.py` and `python3 app.py` to ensure baseline works
-2. **Check dependencies**: Verify ffmpeg and Python packages are installed
-3. **Review architecture**: Understand component responsibilities before modifying
-
-### Testing Individual Components
-
-**Test RSS fetching:**
-```bash
-python3 -c "from main import NewsBulletinAggregator; agg = NewsBulletinAggregator(); print(agg.fetch_latest_bulletin('ABC News Top Stories', 'https://www.abc.net.au/feeds/101858056/podcast.xml'))"
-```
-
-**Test audio combination:**
-```bash
-python3 -c "from main import NewsBulletinAggregator; from pathlib import Path; agg = NewsBulletinAggregator(); print(agg.combine_audio_files([Path('output/test1.mp3'), Path('output/test2.mp3')], 'test_combined.mp3'))"
-```
-
-**Test email sending:**
-```bash
-python3 -c "from email_sender import EmailSender; sender = EmailSender(); print(sender.send_bulletin(Path('output/test.mp3'), 'Test Profile', 'recipient@example.com'))"
-```
-
-**Test config loading:**
-```bash
-python3 -c "from app import load_config; import json; print(json.dumps(load_config(), indent=2))"
-```
-
-### Code Style
-
-- **Australian English**: colour, organise, centre, analyse
-- **Docstrings**: Include for all classes and public methods
-- **Type hints**: Optional but encouraged for complex functions
-- **Error handling**: Catch specific exceptions, log errors, return None or False on failure
-- **Logging**: Use `logger.info()` for progress, `logger.error()` for failures
-
-### Adding New Features
-
-**Example: Add podcast intro music**
-1. Add intro MP3 file to `static/audio/intro.mp3`
-2. Modify `main.py` → `combine_audio_files()` to prepend intro
-3. Add configuration option in `config.json` for intro enable/disable
-4. Update web UI with toggle checkbox
-5. Test with various profiles
-6. Update CLAUDE.md documentation
-
-## Git Workflow
-
-### Current State
-- **Branch**: main
-- **Last commit**: Initial commit (4e962bd)
-- **Untracked**: `qbit/` and `quantium-brand-guidelines/` (reference materials, not used by app)
-
-### Making Commits
-
-Follow standard git workflow:
-```bash
-git add <files>
-git commit -m "Subject line
-
-Detailed description of changes.
-
-Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
-```
-
-### Protected Files (Never Commit)
-- `.env` - Contains SMTP credentials
-- `output/*.mp3` - Generated audio files (large)
-- `token.json` - OAuth tokens (if added in future)
-- `__pycache__/` - Python cache
-
-All protected files are listed in `.gitignore`.
-
-## Future Enhancement Ideas
-
-- **Scheduling UI**: Add web-based cron job configuration
-- **Audio effects**: Volume normalisation, compression, EQ
-- **Playlist mode**: Generate multiple bulletins with different source combinations
-- **Export formats**: Support for other audio formats (OGG, AAC)
-- **Cloud storage**: Integration with S3/Dropbox for large files
-- **RSS feed validation**: Check feeds before saving
-- **Audio preview**: Play samples of each source before combining
-- **Batch generation**: Generate bulletins for all profiles at once
-- **Analytics**: Track which sources are most popular
-- **Mobile app**: React Native or Flutter companion app
-
-## Related Files
-
-- `EMAIL_SETUP_GUIDE.md` - Detailed SMTP configuration instructions
-- `README.md` - User-facing documentation
-- `.env.example` - Template for environment variables
-- `requirements.txt` - Python package dependencies
+## Code Style
+- **Australian English**: normalise, colour, organise, centre, analyse
+- **Logging**: `logger.info()` for progress, `logger.error()` for failures, `logger.warning()` for non-fatal issues
+- **Error handling**: Catch specific exceptions, log internally, return user-friendly JSON responses
+- **Security**: Path traversal prevention via `is_relative_to()`, input validation with regex, env vars for secrets
