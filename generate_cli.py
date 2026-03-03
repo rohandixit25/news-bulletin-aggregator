@@ -147,22 +147,31 @@ def reauth_gdrive() -> None:
     token_file = BASE_DIR / "gdrive_token.json"
     scopes = ["https://www.googleapis.com/auth/drive.file"]
 
-    # Find credentials file: try gdrive_credentials.json, then client_secret_*.json
-    creds_file = BASE_DIR / "gdrive_credentials.json"
-    if not creds_file.exists():
-        # Fallback: look for client_secret_*.json (Google Cloud Console download)
-        candidates = list(BASE_DIR.glob("client_secret_*.json"))
-        if candidates:
-            creds_file = candidates[0]
+    # Find credentials file: prefer client_secret_*.json (clean Google download),
+    # fall back to gdrive_credentials.json. Validate JSON before using.
+    creds_file = None
+    candidates = list(BASE_DIR.glob("client_secret_*.json"))
+    search_order = candidates + [BASE_DIR / "gdrive_credentials.json"]
+
+    for candidate in search_order:
+        if not candidate.exists():
+            continue
+        try:
+            with open(candidate, "r") as f:
+                json.load(f)  # validate JSON is parseable
+            creds_file = candidate
             logger.info("Using credentials file: %s", creds_file.name)
-        else:
-            logger.error(
-                "No Google OAuth credentials found. Expected one of:\n"
-                "  - gdrive_credentials.json\n"
-                "  - client_secret_*.json\n"
-                "Download from Google Cloud Console.",
-            )
-            sys.exit(1)
+            break
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Skipping %s (invalid JSON): %s", candidate.name, e)
+
+    if creds_file is None:
+        logger.error(
+            "No valid Google OAuth credentials found. Expected one of:\n"
+            "  - client_secret_*.json (download from Google Cloud Console)\n"
+            "  - gdrive_credentials.json",
+        )
+        sys.exit(1)
 
     logger.info("Starting Google Drive OAuth2 flow on port 8090...")
     logger.info("A browser window will open — log in and authorise Google Drive access.")
