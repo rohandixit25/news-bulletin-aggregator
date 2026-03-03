@@ -7,13 +7,13 @@ Usage:
     python3 generate_cli.py --profile rohan     # Generate for a specific profile
     python3 generate_cli.py --reauth-gdrive     # Re-authenticate Google Drive OAuth2
 
-Designed for GitHub Actions cron or local use — no Flask, APScheduler, or gunicorn needed.
+Designed for GitHub Actions cron or local use.
+No Flask, APScheduler, or gunicorn needed.
 """
 
 import argparse
 import json
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -174,7 +174,9 @@ def reauth_gdrive() -> None:
         sys.exit(1)
 
     logger.info("Starting Google Drive OAuth2 flow on port 8090...")
-    logger.info("A browser window will open — log in and authorise Google Drive access.")
+    logger.info(
+        "A browser window will open — log in and authorise."
+    )
 
     flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), scopes)
     creds = flow.run_local_server(

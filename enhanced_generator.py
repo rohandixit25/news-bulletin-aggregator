@@ -4,23 +4,26 @@ Enhanced News Bulletin Generator with progress tracking, parallel downloads,
 audio normalisation, chapter markers, and graceful error handling.
 """
 
-import logging
 import json
+import logging
 import re
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from queue import Queue
 from typing import Dict, Generator
-from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from pydub import AudioSegment
+
 from main import NewsBulletinAggregator
 
 logger = logging.getLogger(__name__)
 
 
 class EnhancedBulletinGenerator(NewsBulletinAggregator):
-    """Enhanced aggregator with progress tracking, parallel downloads, and chapter markers"""
+    """Enhanced aggregator with progress tracking, parallel downloads,
+    and chapter markers."""
 
     def __init__(self, output_dir='./output'):
         super().__init__(output_dir)
@@ -34,7 +37,8 @@ class EnhancedBulletinGenerator(NewsBulletinAggregator):
         }
 
     def _copy_to_gdrive(self, output_path: Path, config=None):
-        """Upload bulletin to Google Drive via API, or copy to local sync folder as fallback."""
+        """Upload bulletin to Google Drive via API,
+        or copy to local sync folder as fallback."""
         if config is None:
             from app import load_config
             config = load_config()
@@ -44,7 +48,9 @@ class EnhancedBulletinGenerator(NewsBulletinAggregator):
             from gdrive_uploader import GDriveUploader
             folder_id = config.get('gdrive_folder_id')
             uploader = GDriveUploader()
-            file_id = uploader.upload(output_path, folder_name='News', folder_id=folder_id)
+            file_id = uploader.upload(
+                output_path, folder_name='News', folder_id=folder_id,
+            )
             if file_id:
                 return
             logger.warning("Drive API upload returned None, trying local copy fallback")
@@ -60,11 +66,17 @@ class EnhancedBulletinGenerator(NewsBulletinAggregator):
             if not dest_dir.is_dir():
                 return
             shutil.copy2(str(output_path), str(dest_dir / output_path.name))
-            logger.info(f"Copied bulletin to Google Drive folder: {dest_dir / output_path.name}")
+            dest = dest_dir / output_path.name
+            logger.info("Copied bulletin to Google Drive: %s", dest)
         except Exception as e:
             logger.warning(f"Failed to copy to Google Drive: {e}")
 
-    def generate_with_progress(self, enabled_sources: Dict[str, str], profile_name: str, config=None) -> Generator[Dict, None, str]:
+    def generate_with_progress(
+        self,
+        enabled_sources: Dict[str, str],
+        profile_name: str,
+        config=None,
+    ) -> Generator[Dict, None, str]:
         """
         Generate bulletin with real-time progress updates.
 
@@ -184,12 +196,16 @@ class EnhancedBulletinGenerator(NewsBulletinAggregator):
             # Stage 2: Combine audio with normalisation and chapter markers
             yield {
                 'stage': 'processing',
-                'message': f'Combining {len(downloaded)} audio files with normalisation...',
+                'message': (
+                    f'Combining {len(downloaded)} audio files'
+                    ' with normalisation...'
+                ),
                 'progress': 60
             }
 
             timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-            profile_slug = re.sub(r'[^a-z0-9_]', '', profile_name.replace(' ', '_').lower())
+            slug = profile_name.replace(' ', '_').lower()
+            profile_slug = re.sub(r'[^a-z0-9_]', '', slug)
             output_filename = f"{profile_slug}_{timestamp}.mp3"
 
             try:
@@ -283,7 +299,10 @@ class EnhancedBulletinGenerator(NewsBulletinAggregator):
             file_size = output_path.stat().st_size
             yield {
                 'stage': 'complete',
-                'message': f'Bulletin ready! ({len(downloaded)} sources, {self.metadata["total_duration"]:.1f}s)',
+                'message': (
+                    f'Bulletin ready! ({len(downloaded)} sources,'
+                    f' {self.metadata["total_duration"]:.1f}s)'
+                ),
                 'progress': 100,
                 'filename': output_filename,
                 'size': file_size,

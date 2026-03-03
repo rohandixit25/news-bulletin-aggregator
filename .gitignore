@@ -15,6 +15,7 @@ ENV/
 
 # Generated audio files
 output/*.mp3
+output/*.json
 output/temp/
 
 # IDE
@@ -37,17 +38,3 @@ credentials.json
 gdrive_credentials.json
 gdrive_token.json
 client_secret_*.json
-
-# User-specific config (keep config.json in repo for structure reference)
-# If you want to exclude it: config.json
-
-# Service files (not needed for Railway)
-*.service
-start-services.sh
-
-# Reference materials
-qbit/
-quantium-brand-guidelines/
-
-# Scheduler (generated at runtime)
-# scheduler.py

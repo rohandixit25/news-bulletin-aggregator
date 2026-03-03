@@ -3,17 +3,17 @@
 News Bulletin Aggregator - Combines daily news bulletins into one audio file
 """
 
-import os
 import logging
 import time
 from calendar import timegm
-from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from pathlib import Path
 from urllib.parse import urlparse
+
 import feedparser
 import requests
 from pydub import AudioSegment
-from pathlib import Path
 
 # Configure logging
 logging.basicConfig(
@@ -40,14 +40,31 @@ class NewsBulletinAggregator:
         self.temp_dir = self.output_dir / 'temp'
         self.temp_dir.mkdir(exist_ok=True)
 
-        # News sources with RSS feed URLs (short bulletins: 1-5 minutes)
+        # News sources with RSS feed URLs (short bulletins: 1-5 min)
         self.news_sources = {
-            'ABC News Top Stories': 'https://www.abc.net.au/feeds/101858056/podcast.xml',  # 60-90 seconds
-            'BBC News 5min': 'https://podcast.voice.api.bbci.co.uk/rss/audio/p002vsmz?api_key=Wbek5zSqxz0Hk1blo5IBqbd9SCWIfNbT',  # 5 minutes
-            'SBS News Updates': 'https://feeds.sbs.com.au/sbs-news-update',  # Morning/Midday/Evening bulletins
-            'CNBC Business Update': 'https://feeds.simplecast.com/oloBAvaH',  # Market open/midday/close updates
-            'CommSec Market Update': 'https://www.omnycontent.com/d/playlist/820f09cf-2ace-4180-a92d-aa4c0008f5fb/7ce30ada-3515-4538-a131-afef0177d550/1b3da022-8454-4155-8336-afef0177d567/podcast.rss',  # Australian market updates
-            'AI News Daily': 'https://ai-news-daily.podigee.io/feed/mp3'  # 5 minute AI news briefing
+            'ABC News Top Stories': (  # 60-90 seconds
+                'https://www.abc.net.au/feeds/101858056/podcast.xml'
+            ),
+            'BBC News 5min': (  # 5 minutes
+                'https://podcast.voice.api.bbci.co.uk/rss/audio/'
+                'p002vsmz?api_key=Wbek5zSqxz0Hk1blo5IBqbd9SCWIfNbT'
+            ),
+            'SBS News Updates': (  # Morning/Midday/Evening
+                'https://feeds.sbs.com.au/sbs-news-update'
+            ),
+            'CNBC Business Update': (  # Market updates
+                'https://feeds.simplecast.com/oloBAvaH'
+            ),
+            'CommSec Market Update': (  # AU market updates
+                'https://www.omnycontent.com/d/playlist/'
+                '820f09cf-2ace-4180-a92d-aa4c0008f5fb/'
+                '7ce30ada-3515-4538-a131-afef0177d550/'
+                '1b3da022-8454-4155-8336-afef0177d567/'
+                'podcast.rss'
+            ),
+            'AI News Daily': (  # 5 minute AI news
+                'https://ai-news-daily.podigee.io/feed/mp3'
+            ),
         }
 
     def fetch_latest_bulletin(self, source_name, feed_url):
@@ -84,7 +101,8 @@ class NewsBulletinAggregator:
                 return None
 
             # Download the audio file
-            logger.info(f"Downloading from {source_name}: {latest_entry.get('title', 'Unknown')}")
+            title = latest_entry.get('title', 'Unknown')
+            logger.info("Downloading from %s: %s", source_name, title)
             response = requests.get(audio_url, timeout=60)
             response.raise_for_status()
 
@@ -94,7 +112,8 @@ class NewsBulletinAggregator:
             if file_extension not in ['mp3', 'wav', 'm4a', 'aac']:
                 file_extension = 'mp3'
 
-            filename = self.temp_dir / f"{source_name.replace(' ', '_')}.{file_extension}"
+            safe_name = source_name.replace(' ', '_')
+            filename = self.temp_dir / f"{safe_name}.{file_extension}"
             filename.write_bytes(response.content)
 
             logger.info(f"Downloaded {source_name} bulletin: {filename}")
@@ -276,7 +295,7 @@ def main():
     result = aggregator.generate_daily_bulletin()
 
     if result:
-        print(f"\n✅ Success! Your combined news bulletin is ready:")
+        print("\n✅ Success! Your combined news bulletin is ready:")
         print(f"   {result}")
     else:
         print("\n❌ Failed to generate bulletin. Check logs for details.")

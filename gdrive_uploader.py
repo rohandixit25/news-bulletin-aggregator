@@ -60,8 +60,11 @@ class GDriveUploader:
                         f.write(creds.to_json())
             else:
                 if not CREDENTIALS_FILE.exists():
-                    logger.error("No Google Drive credentials available. "
-                                 "Set GDRIVE_TOKEN env var or provide gdrive_credentials.json")
+                    logger.error(
+                        "No Google Drive credentials available. "
+                        "Set GDRIVE_TOKEN env var or provide "
+                        "gdrive_credentials.json"
+                    )
                     return False
 
                 flow = InstalledAppFlow.from_client_secrets_file(
