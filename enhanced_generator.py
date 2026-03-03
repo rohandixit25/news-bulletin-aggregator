@@ -33,10 +33,11 @@ class EnhancedBulletinGenerator(NewsBulletinAggregator):
             'chapters': []
         }
 
-    def _copy_to_gdrive(self, output_path: Path):
+    def _copy_to_gdrive(self, output_path: Path, config=None):
         """Upload bulletin to Google Drive via API, or copy to local sync folder as fallback."""
-        from app import load_config
-        config = load_config()
+        if config is None:
+            from app import load_config
+            config = load_config()
 
         # Try Drive API upload first
         try:
@@ -63,7 +64,7 @@ class EnhancedBulletinGenerator(NewsBulletinAggregator):
         except Exception as e:
             logger.warning(f"Failed to copy to Google Drive: {e}")
 
-    def generate_with_progress(self, enabled_sources: Dict[str, str], profile_name: str) -> Generator[Dict, None, str]:
+    def generate_with_progress(self, enabled_sources: Dict[str, str], profile_name: str, config=None) -> Generator[Dict, None, str]:
         """
         Generate bulletin with real-time progress updates.
 
@@ -242,7 +243,7 @@ class EnhancedBulletinGenerator(NewsBulletinAggregator):
                 self.metadata['chapters'] = chapters
 
                 # Copy to Google Drive sync folder if configured
-                self._copy_to_gdrive(output_path)
+                self._copy_to_gdrive(output_path, config=config)
 
                 yield {
                     'stage': 'processing',

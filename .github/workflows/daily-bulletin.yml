@@ -1,0 +1,46 @@
+name: Daily News Bulletin
+
+on:
+  schedule:
+    # 18:00 UTC = 05:00 AEDT (Sydney, UTC+11, Nov-Apr)
+    # During AEST (Apr-Oct) this runs at 04:00 Sydney — close enough
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Profile ID (leave blank for all scheduled profiles)"
+        required: false
+        type: string
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements-cli.txt
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-cli.txt
+
+      - name: Generate bulletin
+        env:
+          # Security: token stored as GitHub secret, not in code (CWE-798)
+          GDRIVE_TOKEN: ${{ secrets.GDRIVE_TOKEN }}
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.profile }}" ]; then
+            ARGS="--profile ${{ inputs.profile }}"
+          fi
+          python3 generate_cli.py $ARGS
