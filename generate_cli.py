@@ -140,31 +140,39 @@ def reauth_gdrive() -> None:
     except ImportError:
         logger.error(
             "google-auth-oauthlib not installed. "
-            "Run: pip install google-auth-oauthlib"
+            "Run: pip3 install google-auth-oauthlib"
         )
         sys.exit(1)
 
-    creds_file = BASE_DIR / "gdrive_credentials.json"
     token_file = BASE_DIR / "gdrive_token.json"
     scopes = ["https://www.googleapis.com/auth/drive.file"]
 
+    # Find credentials file: try gdrive_credentials.json, then client_secret_*.json
+    creds_file = BASE_DIR / "gdrive_credentials.json"
     if not creds_file.exists():
-        logger.error(
-            "gdrive_credentials.json not found at %s. "
-            "Download from Google Cloud Console.",
-            creds_file,
-        )
-        sys.exit(1)
+        # Fallback: look for client_secret_*.json (Google Cloud Console download)
+        candidates = list(BASE_DIR.glob("client_secret_*.json"))
+        if candidates:
+            creds_file = candidates[0]
+            logger.info("Using credentials file: %s", creds_file.name)
+        else:
+            logger.error(
+                "No Google OAuth credentials found. Expected one of:\n"
+                "  - gdrive_credentials.json\n"
+                "  - client_secret_*.json\n"
+                "Download from Google Cloud Console.",
+            )
+            sys.exit(1)
 
     logger.info("Starting Google Drive OAuth2 flow on port 8090...")
-    logger.info("Open the URL shown below in your browser to authorise.")
+    logger.info("A browser window will open — log in and authorise Google Drive access.")
 
     flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), scopes)
     creds = flow.run_local_server(
         host="localhost",
         bind_addr="0.0.0.0",
         port=8090,
-        open_browser=False,
+        open_browser=True,
         prompt="consent",
         access_type="offline",
     )
