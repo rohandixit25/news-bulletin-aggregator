@@ -2,8 +2,11 @@ name: Daily News Bulletin
 
 on:
   schedule:
-    # 18:00 UTC = 05:00 AEDT (Sydney, UTC+11, Nov-Apr)
-    # During AEST (Apr-Oct) this runs at 04:00 Sydney — close enough
+    # Two triggers to hit 4am Sydney regardless of DST:
+    #   17:00 UTC = 04:00 AEDT (UTC+11, Nov–Apr)
+    #   18:00 UTC = 04:00 AEST (UTC+10, Apr–Oct)
+    # The time-check step below skips the run if it isn't actually 4am Sydney.
+    - cron: "0 17 * * *"
     - cron: "0 18 * * *"
   workflow_dispatch:
     inputs:
@@ -18,10 +21,23 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      - name: Check Sydney time
+        id: check-time
+        run: |
+          SYDNEY_HOUR=$(TZ=Australia/Sydney date +%H)
+          if [ "$SYDNEY_HOUR" = "04" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "Not 4am Sydney (current: ${SYDNEY_HOUR}:00) — skipping duplicate trigger"
+          fi
+
       - name: Checkout repository
+        if: steps.check-time.outputs.should_run == 'true' || github.event_name == 'workflow_dispatch'
         uses: actions/checkout@v4
 
       - name: Set up Python 3.11
+        if: steps.check-time.outputs.should_run == 'true' || github.event_name == 'workflow_dispatch'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -29,12 +45,16 @@ jobs:
           cache-dependency-path: requirements.txt
 
       - name: Install ffmpeg
+        if: steps.check-time.outputs.should_run == 'true' || github.event_name == 'workflow_dispatch'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Install Python dependencies
+        if: steps.check-time.outputs.should_run == 'true' || github.event_name == 'workflow_dispatch'
         run: pip install -r requirements.txt
 
       - name: Generate bulletin
+        if: steps.check-time.outputs.should_run == 'true' || github.event_name == 'workflow_dispatch'
+        id: generate
         env:
           # Security: token stored as GitHub secret, not in code (CWE-798)
           GDRIVE_TOKEN: ${{ secrets.GDRIVE_TOKEN }}
@@ -44,3 +64,21 @@ jobs:
             ARGS="--profile ${{ inputs.profile }}"
           fi
           python3 generate_cli.py $ARGS
+
+      - name: Send notification email
+        if: (steps.check-time.outputs.should_run == 'true' || github.event_name == 'workflow_dispatch') && steps.generate.outcome == 'success'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          to: rohanmdixit@gmail.com
+          from: ${{ secrets.SMTP_USERNAME }}
+          subject: "Your daily news bulletin is ready"
+          body: |
+            Your news bulletin has been generated and uploaded to Google Drive.
+
+            Open it here:
+            https://drive.google.com/drive/folders/1JrXPZfRFawvGGp7xOiXDJnfsn3zlXkQz
