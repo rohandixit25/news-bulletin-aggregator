@@ -2,12 +2,12 @@ name: Daily News Bulletin
 
 on:
   schedule:
-    # Two triggers to hit 4am Sydney regardless of DST:
+    # Single trigger at 17:00 UTC (~4am Sydney regardless of DST):
     #   17:00 UTC = 04:00 AEDT (UTC+11, Nov–Apr)
-    #   18:00 UTC = 04:00 AEST (UTC+10, Apr–Oct)
-    # The time-check step below skips the run if it isn't actually 4am Sydney.
+    #   17:00 UTC = 03:00 AEST (UTC+10, Apr–Oct)
+    # GitHub Actions can delay up to ~90 min, so the time-check below accepts
+    # a wide window (03:00–07:00 Sydney) rather than an exact hour.
     - cron: "0 17 * * *"
-    - cron: "0 18 * * *"
   workflow_dispatch:
     inputs:
       profile:
@@ -25,11 +25,13 @@ jobs:
         id: check-time
         run: |
           SYDNEY_HOUR=$(TZ=Australia/Sydney date +%H)
-          if [ "$SYDNEY_HOUR" = "04" ]; then
+          # Accept 03:00–07:00 Sydney — wide enough to absorb GitHub's typical
+          # 60–90 min scheduling delay while still blocking afternoon re-runs.
+          if [ "$SYDNEY_HOUR" -ge 3 ] && [ "$SYDNEY_HOUR" -le 7 ]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
-            echo "Not 4am Sydney (current: ${SYDNEY_HOUR}:00) — skipping duplicate trigger"
+            echo "Outside 03:00–07:59 Sydney window (current: ${SYDNEY_HOUR}:00) — skipping"
           fi
 
       - name: Checkout repository
