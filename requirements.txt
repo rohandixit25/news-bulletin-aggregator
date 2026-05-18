@@ -6,3 +6,7 @@ python-dotenv>=1.0.0
 google-api-python-client>=2.100.0
 google-auth-httplib2>=0.2.0
 google-auth-oauthlib>=1.1.0
+
+# Briefing pipeline (LLM curation + neural TTS) — used for profiles with briefing_mode=true
+google-genai>=1.0.0
+edge-tts>=7.0.0

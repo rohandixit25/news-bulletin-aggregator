@@ -83,25 +83,40 @@ def generate_for_profile(profile_id: str, config: dict) -> str | None:
 
     profile_data = profiles[profile_id]
     profile_name = profile_data.get("name", profile_id)
-    enabled_sources = get_enabled_sources(profile_data)
+    briefing_mode = bool(profile_data.get("briefing_mode"))
+
+    if briefing_mode:
+        enabled_sources = profile_data.get("news_feeds", {}) or {}
+        pipeline = "briefing"
+    else:
+        enabled_sources = get_enabled_sources(profile_data)
+        pipeline = "audio-stitch"
 
     if not enabled_sources:
         logger.warning(
-            "Profile '%s' has no enabled sources — skipping", profile_name
+            "Profile '%s' (%s) has no enabled sources — skipping",
+            profile_name,
+            pipeline,
         )
         return None
 
     logger.info(
-        "Generating bulletin for '%s' with %d sources: %s",
+        "Generating %s bulletin for '%s' with %d sources: %s",
+        pipeline,
         profile_name,
         len(enabled_sources),
         ", ".join(enabled_sources.keys()),
     )
 
     # Import here to avoid loading pydub/feedparser unless actually generating
-    from enhanced_generator import EnhancedBulletinGenerator
+    if briefing_mode:
+        from briefing_generator import BriefingGenerator
 
-    generator = EnhancedBulletinGenerator(output_dir=str(BASE_DIR / "output"))
+        generator = BriefingGenerator(output_dir=str(BASE_DIR / "output"))
+    else:
+        from enhanced_generator import EnhancedBulletinGenerator
+
+        generator = EnhancedBulletinGenerator(output_dir=str(BASE_DIR / "output"))
     filename = None
 
     for event in generator.generate_with_progress(

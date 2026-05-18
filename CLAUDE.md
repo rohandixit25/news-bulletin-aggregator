@@ -4,7 +4,11 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 ## Repository Overview
 
-News Bulletin Aggregator — a CLI tool that fetches audio bulletins from RSS podcast feeds (ABC, BBC, SBS, CNBC, CommSec, AI News Daily), combines them into a single normalised MP3 with chapter markers, and uploads to Google Drive. Runs daily via GitHub Actions cron.
+News Bulletin Aggregator — a CLI tool that runs daily via GitHub Actions cron and supports **two pipelines**, selected per profile:
+
+1. **Audio-stitch** (default) — fetches audio bulletins from RSS podcast feeds (ABC, BBC, SBS, CNBC, CommSec, AI News Daily), normalises and combines into a single MP3 with chapter markers, uploads to Google Drive. Class: `NewsBulletinAggregator` in `main.py`.
+
+2. **Briefing** (`briefing_mode: true` in profile) — fetches news text from RSS feeds, calls Gemini to curate items for the profile's `topics`, writes a markdown summary, synthesises an audio version with edge-tts (free, neural voices), uploads both `.md` and `.mp3` to Google Drive. Optional pre-upload cleanup of prior bulletins. Class: `BriefingGenerator` in `briefing_generator.py`.
 
 **Location**: `/workspace/news_bulletin_aggregator/`
 
@@ -114,6 +118,8 @@ GitHub Actions cron (18:00 UTC daily)
 | Variable | Where | Description |
 |----------|-------|-------------|
 | `GDRIVE_TOKEN` | GitHub secret | JSON string of Google OAuth2 token |
+| `GEMINI_API_KEY` | GitHub secret | Required for `briefing_mode: true` profiles. Free key from https://aistudio.google.com/apikey |
+| `EDGE_TTS_INSECURE` | Local dev only | Set to `1` in the devcontainer .env to bypass the Quantium MITM proxy's self-signed certs in edge-tts. **Never set in CI.** |
 
 ### Google Drive Setup
 

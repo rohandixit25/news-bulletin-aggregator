@@ -118,6 +118,14 @@ class GDriveUploader:
         logger.info(f"Created Google Drive folder: {folder_name}")
         return folder.get('id')
 
+    # MIME types inferred from extension for non-audio uploads
+    _MIMETYPES = {
+        '.mp3': 'audio/mpeg',
+        '.md': 'text/markdown',
+        '.json': 'application/json',
+        '.txt': 'text/plain',
+    }
+
     def upload(self, file_path, folder_name='News', folder_id=None):
         """
         Upload a file to the specified Google Drive folder.
@@ -142,6 +150,10 @@ class GDriveUploader:
             if not folder_id:
                 folder_id = self._find_or_create_folder(folder_name)
 
+            mimetype = self._MIMETYPES.get(
+                file_path.suffix.lower(), 'application/octet-stream'
+            )
+
             file_metadata = {
                 'name': file_path.name,
                 'parents': [folder_id]
@@ -149,7 +161,7 @@ class GDriveUploader:
 
             media = MediaFileUpload(
                 str(file_path),
-                mimetype='audio/mpeg',
+                mimetype=mimetype,
                 resumable=True
             )
 
@@ -168,3 +180,70 @@ class GDriveUploader:
         except Exception as e:
             logger.error(f"Google Drive upload failed: {e}")
             return None
+
+    def cleanup_folder(self, folder_id, name_prefix=None, keep_newest=0):
+        """
+        Delete files from a Drive folder before uploading new ones.
+
+        Args:
+            folder_id: Drive folder ID to clean
+            name_prefix: Only delete files whose name starts with this prefix
+                (None = delete all files in the folder, ignoring subfolders)
+            keep_newest: Keep the N most recently modified matching files
+
+        Returns:
+            Count of files deleted (or -1 on error)
+        """
+        if not folder_id:
+            logger.warning("cleanup_folder called without folder_id")
+            return -1
+
+        try:
+            if not self.service and not self._authenticate():
+                return -1
+
+            # Security: parameterise query, never concatenate user-provided strings
+            # into the q= clause — Drive's query language allows injection of
+            # additional filters otherwise (CWE-89-equivalent).
+            safe_folder = str(folder_id).replace("'", "")
+            query = (
+                f"'{safe_folder}' in parents and trashed = false and "
+                f"mimeType != 'application/vnd.google-apps.folder'"
+            )
+
+            files = []
+            page_token = None
+            while True:
+                resp = self.service.files().list(
+                    q=query,
+                    spaces='drive',
+                    fields='nextPageToken, files(id, name, modifiedTime)',
+                    pageSize=100,
+                    pageToken=page_token,
+                ).execute()
+                files.extend(resp.get('files', []))
+                page_token = resp.get('nextPageToken')
+                if not page_token:
+                    break
+
+            if name_prefix:
+                files = [f for f in files if f.get('name', '').startswith(name_prefix)]
+
+            # Sort newest first; keep N newest
+            files.sort(key=lambda f: f.get('modifiedTime', ''), reverse=True)
+            to_delete = files[keep_newest:]
+
+            deleted = 0
+            for f in to_delete:
+                try:
+                    self.service.files().delete(fileId=f['id']).execute()
+                    logger.info("Deleted old bulletin: %s", f.get('name'))
+                    deleted += 1
+                except Exception as e:
+                    logger.warning("Failed to delete %s: %s", f.get('name'), e)
+
+            return deleted
+
+        except Exception as e:
+            logger.error(f"Cleanup failed: {e}")
+            return -1

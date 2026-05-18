@@ -97,61 +97,36 @@
       },
       "schedule": {
         "enabled": true,
-        "time": "05:00",
+        "time": "04:00",
         "timezone": "Australia/Sydney"
       }
     },
     "lakshana": {
-      "name": "Lakshana",
-      "sources": {
-        "ABC News Top Stories": {
-          "enabled": false,
-          "url": "https://www.abc.net.au/feeds/101858056/podcast.xml",
-          "description": "Australian news headlines (60-90 seconds)",
-          "custom": false,
-          "order": 0
-        },
-        "AI News Daily": {
-          "enabled": true,
-          "url": "https://ai-news-daily.podigee.io/feed/mp3",
-          "description": "AI technology news (5 minutes)",
-          "custom": false,
-          "order": 1
-        },
-        "BBC News 5min": {
-          "enabled": false,
-          "url": "https://podcast.voice.api.bbci.co.uk/rss/audio/p002vsmz?api_key=Wbek5zSqxz0Hk1blo5IBqbd9SCWIfNbT",
-          "description": "World news bulletin (5 minutes)",
-          "custom": false,
-          "order": 2
-        },
-        "CNBC Business Update": {
-          "enabled": false,
-          "url": "https://feeds.simplecast.com/oloBAvaH",
-          "description": "US market updates (3-5 minutes)",
-          "custom": false,
-          "order": 3
-        },
-        "CommSec Market Update": {
-          "enabled": false,
-          "url": "https://www.omnycontent.com/d/playlist/820f09cf-2ace-4180-a92d-aa4c0008f5fb/7ce30ada-3515-4538-a131-afef0177d550/1b3da022-8454-4155-8336-afef0177d567/podcast.rss",
-          "description": "Australian market commentary",
-          "custom": false,
-          "order": 4
-        },
-        "SBS News Updates": {
-          "enabled": false,
-          "url": "https://feeds.sbs.com.au/sbs-news-update",
-          "description": "Australian/World news (morning/midday/evening)",
-          "custom": false,
-          "order": 5
-        }
+      "name": "Lakshi",
+      "briefing_mode": true,
+      "audience": "Lakshi (Samantha), a busy non-finance professional married to a banking executive — keep it plain English, no jargon",
+      "voice": "en-AU-NatashaNeural",
+      "topics": [
+        "World news — major political, geopolitical, economic events of the day",
+        "Banking: credit, risk, and capital — Australia (APRA, RBA, Big Four) and global banks"
+      ],
+      "news_feeds": {
+        "BBC World": "https://feeds.bbci.co.uk/news/world/rss.xml",
+        "BBC Business": "https://feeds.bbci.co.uk/news/business/rss.xml",
+        "ABC News Top Stories": "https://www.abc.net.au/news/feed/45910/rss.xml",
+        "ABC News Business": "https://www.abc.net.au/news/feed/51892/rss.xml",
+        "GoogleNews — banking Australia": "https://news.google.com/rss/search?q=Australia+banking+credit+risk+APRA+RBA+when:2d&hl=en-AU&gl=AU&ceid=AU:en",
+        "GoogleNews — global banks": "https://news.google.com/rss/search?q=global+banks+credit+risk+capital+when:2d&hl=en-AU&gl=AU&ceid=AU:en"
       },
+      "briefing_folder_id": "1DnhgJA4DpvPSOHpt_GAM8OwX7CquSDU_",
+      "briefing_cleanup": true,
+      "briefing_keep_newest": 0,
       "schedule": {
-        "enabled": false,
-        "time": "06:00",
+        "enabled": true,
+        "time": "05:00",
         "timezone": "Australia/Sydney"
-      }
+      },
+      "sources": {}
     }
   },
   "device_profiles": {

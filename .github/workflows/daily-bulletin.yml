@@ -58,8 +58,10 @@ jobs:
         if: steps.check-time.outputs.should_run == 'true' || github.event_name == 'workflow_dispatch'
         id: generate
         env:
-          # Security: token stored as GitHub secret, not in code (CWE-798)
+          # Security: tokens stored as GitHub secrets, not in code (CWE-798)
           GDRIVE_TOKEN: ${{ secrets.GDRIVE_TOKEN }}
+          # Required for profiles with briefing_mode=true (LLM-curated briefings)
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           ARGS=""
           if [ -n "${{ inputs.profile }}" ]; then
